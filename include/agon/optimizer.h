@@ -17,6 +17,8 @@ namespace agon::optim {
             explicit Optimizer(std::initializer_list<ParameterView*> params);
 
             void zero_grad();
+            void add_parameter(ParameterView& param);
+
             virtual void step() = 0;
 
             virtual void load_from_bin(const std::string& path) = 0;
