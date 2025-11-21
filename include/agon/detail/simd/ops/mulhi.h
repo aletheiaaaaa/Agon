@@ -12,7 +12,6 @@
 #endif
 
 namespace agon::simd {
-    // High part of signed integer multiplication (only available for I16)
     template<typename Vec>
     inline Vec mulhi(const Vec& a, const Vec& b);
 

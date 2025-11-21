@@ -12,7 +12,6 @@
 #endif
 
 namespace agon::simd {
-    // Division (only available for floating-point types)
     template<typename Vec>
     inline Vec div(const Vec& a, const Vec& b);
 

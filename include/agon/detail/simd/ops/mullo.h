@@ -12,7 +12,6 @@
 #endif
 
 namespace agon::simd {
-    // Low part of integer multiplication (available for I16, I32, and I64 on AVX512)
     template<typename Vec>
     inline Vec mullo(const Vec& a, const Vec& b);
 

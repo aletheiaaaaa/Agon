@@ -3,6 +3,8 @@
 #include "../arch.h"
 #include "../types.h"
 
+#include <stdfloat>
+
 #if defined(__AVX512F__)
     #include <immintrin.h>
 #elif defined(__AVX2__)
@@ -39,7 +41,7 @@ namespace agon::simd {
 
 #if defined(HAS_FLOAT16) && HAS_FLOAT16
     template<>
-    inline VecF16<Arch::AVX512> set1(_Float16 val) {
+    inline VecF16<Arch::AVX512> set1(std::float16_t val) {
         return VecF16<Arch::AVX512>(_mm512_set1_ph(val));
     }
 #endif

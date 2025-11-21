@@ -12,7 +12,6 @@
 #endif
 
 namespace agon::simd {
-    // Element-wise multiplication (only available for floating-point types)
     template<typename Vec>
     inline Vec mul(const Vec& a, const Vec& b);
 

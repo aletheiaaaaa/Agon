@@ -1,4 +1,5 @@
 #include "../include/agon/parameter.h"
+#include "../include/agon/detail/simd/ops.h"
 
 namespace agon {
     template<typename T, typename G>
@@ -43,7 +44,17 @@ namespace agon {
 
     template<typename T, typename G>
     void Parameter<T, G>::accumulate(const std::vector<G>& new_grad) {
-        for (size_t i = 0; i < grads.size(); i++) {
+        constexpr size_t vec_size = vec<G>::size;
+
+        size_t i = 0;
+        for (; i + vec_size <= grads.size(); i += vec_size) {
+            auto grad_vec = simd::load<vec<G>>(&grads[i]);
+            auto new_grad_vec = simd::load<vec<G>>(&new_grad[i]);
+            grad_vec = simd::add(grad_vec, new_grad_vec);
+            simd::store(&grads[i], grad_vec);
+        }
+
+        for (; i < grads.size(); ++i) {
             grads[i] += new_grad[i];
         }
     }

@@ -3,6 +3,8 @@
 #include "../arch.h"
 #include "../types.h"
 
+#include <stdfloat>
+
 #if defined(__AVX512F__)
     #include <immintrin.h>
 #elif defined(__AVX2__)
@@ -38,7 +40,7 @@ namespace agon::simd {
 
 #if defined(HAS_FLOAT16) && HAS_FLOAT16
     template<>
-    inline void store(_Float16* ptr, const VecF16<Arch::AVX512>& v) {
+    inline void store(std::float16_t* ptr, const VecF16<Arch::AVX512>& v) {
         _mm512_storeu_ph(ptr, v.data);
     }
 #endif

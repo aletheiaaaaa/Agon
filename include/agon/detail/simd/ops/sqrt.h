@@ -14,7 +14,6 @@
 #endif
 
 namespace agon::simd {
-    // Square root (only available for floating-point types)
     template<typename Vec>
     inline Vec sqrt(const Vec& a);
 

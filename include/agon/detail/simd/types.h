@@ -38,6 +38,7 @@ namespace agon::simd {
 #if defined(__AVX512F__)
     template<>
     struct VecI8<Arch::AVX512> {
+        using scalar_type = int8_t;
         static constexpr size_t size = 64;
         __m512i data;
 
@@ -47,6 +48,7 @@ namespace agon::simd {
 
     template<>
     struct VecI16<Arch::AVX512> {
+        using scalar_type = int16_t;
         static constexpr size_t size = 32;
         __m512i data;
 
@@ -56,6 +58,7 @@ namespace agon::simd {
 
     template<>
     struct VecI32<Arch::AVX512> {
+        using scalar_type = int32_t;
         static constexpr size_t size = 16;
         __m512i data;
 
@@ -65,6 +68,7 @@ namespace agon::simd {
 
     template<>
     struct VecI64<Arch::AVX512> {
+        using scalar_type = int64_t;
         static constexpr size_t size = 8;
         __m512i data;
 
@@ -75,6 +79,7 @@ namespace agon::simd {
 #if HAS_FLOAT16
     template<>
     struct VecF16<Arch::AVX512> {
+        using scalar_type = std::float16_t;
         static constexpr size_t size = 32;
         __m512h data;
 
@@ -85,6 +90,7 @@ namespace agon::simd {
 
     template<>
     struct VecF32<Arch::AVX512> {
+        using scalar_type = float;
         static constexpr size_t size = 16;
         __m512 data;
 
@@ -94,6 +100,7 @@ namespace agon::simd {
 
     template<>
     struct VecF64<Arch::AVX512> {
+        using scalar_type = double;
         static constexpr size_t size = 8;
         __m512d data;
 
@@ -103,6 +110,7 @@ namespace agon::simd {
 #elif defined(__AVX2__)
     template<>
     struct VecI8<Arch::AVX2> {
+        using scalar_type = int8_t;
         static constexpr size_t size = 32;
         __m256i data;
 
@@ -112,6 +120,7 @@ namespace agon::simd {
 
     template<>
     struct VecI16<Arch::AVX2> {
+        using scalar_type = int16_t;
         static constexpr size_t size = 16;
         __m256i data;
 
@@ -121,6 +130,7 @@ namespace agon::simd {
 
     template<>
     struct VecI32<Arch::AVX2> {
+        using scalar_type = int32_t;
         static constexpr size_t size = 8;
         __m256i data;
 
@@ -130,6 +140,7 @@ namespace agon::simd {
 
     template<>
     struct VecI64<Arch::AVX2> {
+        using scalar_type = int64_t;
         static constexpr size_t size = 4;
         __m256i data;
 
@@ -139,6 +150,7 @@ namespace agon::simd {
 
     template<>
     struct VecF32<Arch::AVX2> {
+        using scalar_type = float;
         static constexpr size_t size = 8;
         __m256 data;
 
@@ -148,6 +160,7 @@ namespace agon::simd {
 
     template<>
     struct VecF64<Arch::AVX2> {
+        using scalar_type = double;
         static constexpr size_t size = 4;
         __m256d data;
 
@@ -157,6 +170,7 @@ namespace agon::simd {
 #elif defined(__SSE4_1__)
     template<>
     struct VecI8<Arch::SSE4_1> {
+        using scalar_type = int8_t;
         static constexpr size_t size = 16;
         __m128i data;
 
@@ -166,6 +180,7 @@ namespace agon::simd {
 
     template<>
     struct VecI16<Arch::SSE4_1> {
+        using scalar_type = int16_t;
         static constexpr size_t size = 8;
         __m128i data;
 
@@ -175,6 +190,7 @@ namespace agon::simd {
 
     template<>
     struct VecI32<Arch::SSE4_1> {
+        using scalar_type = int32_t;
         static constexpr size_t size = 4;
         __m128i data;
 
@@ -184,6 +200,7 @@ namespace agon::simd {
 
     template<>
     struct VecI64<Arch::SSE4_1> {
+        using scalar_type = int64_t;
         static constexpr size_t size = 2;
         __m128i data;
 
@@ -193,6 +210,7 @@ namespace agon::simd {
 
     template<>
     struct VecF32<Arch::SSE4_1> {
+        using scalar_type = float;
         static constexpr size_t size = 4;
         __m128 data;
 
@@ -202,6 +220,7 @@ namespace agon::simd {
 
     template<>
     struct VecF64<Arch::SSE4_1> {
+        using scalar_type = double;
         static constexpr size_t size = 2;
         __m128d data;
 
@@ -211,6 +230,7 @@ namespace agon::simd {
 #else
     template<>
     struct VecI8<Arch::GENERIC> {
+        using scalar_type = int8_t;
         static constexpr size_t size = 1;
         int8_t data;
 
@@ -220,6 +240,7 @@ namespace agon::simd {
 
     template<>
     struct VecI16<Arch::GENERIC> {
+        using scalar_type = int16_t;
         static constexpr size_t size = 1;
         int16_t data;
 
@@ -229,6 +250,7 @@ namespace agon::simd {
 
     template<>
     struct VecI32<Arch::GENERIC> {
+        using scalar_type = int32_t;
         static constexpr size_t size = 1;
         int32_t data;
 
@@ -238,6 +260,7 @@ namespace agon::simd {
 
     template<>
     struct VecI64<Arch::GENERIC> {
+        using scalar_type = int64_t;
         static constexpr size_t size = 1;
         int64_t data;
 
@@ -247,6 +270,7 @@ namespace agon::simd {
 
     template<>
     struct VecF32<Arch::GENERIC> {
+        using scalar_type = float;
         static constexpr size_t size = 1;
         float data;
 
@@ -256,6 +280,7 @@ namespace agon::simd {
 
     template<>
     struct VecF64<Arch::GENERIC> {
+        using scalar_type = double;
         static constexpr size_t size = 1;
         double data;
 
@@ -264,13 +289,16 @@ namespace agon::simd {
     };
 #endif
 
-    using vec_i8 = VecI8<CURRENT_ARCH>;
-    using vec_i16 = VecI16<CURRENT_ARCH>;
-    using vec_i32 = VecI32<CURRENT_ARCH>;
-    using vec_i64 = VecI64<CURRENT_ARCH>;
-    using vec_f32 = VecF32<CURRENT_ARCH>;
-    using vec_f64 = VecF64<CURRENT_ARCH>;
-#if HAS_FLOAT16
-    using vec_f16 = VecF16<CURRENT_ARCH>;
-#endif
+    template<typename T, Arch arch>
+    struct VecType;
+
+    template<Arch arch> struct VecType<int8_t, arch> { using type = VecI8<arch>; };
+    template<Arch arch> struct VecType<int16_t, arch> { using type = VecI16<arch>; };
+    template<Arch arch> struct VecType<int32_t, arch> { using type = VecI32<arch>; };
+    template<Arch arch> struct VecType<int64_t, arch> { using type = VecI64<arch>; };
+    template<Arch arch> struct VecType<float, arch> { using type = VecF32<arch>; };
+    template<Arch arch> struct VecType<double, arch> { using type = VecF64<arch>; };
+
+    template<typename T>
+    using vec = typename VecType<T, CURRENT_ARCH>::type;
 }
