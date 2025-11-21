@@ -6,7 +6,7 @@
 
 namespace agon::estim {
     struct EstimatorState {
-        size_t func_calls = 0;
+        size_t calls = 0;
     };
 
     class Estimator {

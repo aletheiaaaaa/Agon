@@ -2,6 +2,9 @@
 
 #include "../optimizer.h"  
 
+#include <stdfloat>
+#include <variant>
+
 namespace agon::optim {
     struct SGDParams {
         float lr = 0.01f;
@@ -12,14 +15,21 @@ namespace agon::optim {
     };
 
     struct SGDState : public OptimizerState {
-        std::variant<std::vector<float>, std::vector<double>> momenta;
+        std::vector<std::variant<std::float16_t, std::float32_t, std::float64_t>> momenta;
     };
 
-    template<class ...Params>
     class SGD : public Optimizer {
         public:
+            template<class ...Params>
             explicit SGD(
                 Params&... params, 
+                float learning_rate = 0.01f, 
+                float momentum = 0.0f, 
+                bool nesterov = false, 
+                bool maximize = false
+            );
+            explicit SGD(
+                std::initializer_list<ParameterView*> params, 
                 float learning_rate = 0.01f, 
                 float momentum = 0.0f, 
                 bool nesterov = false, 
