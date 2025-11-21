@@ -1,4 +1,7 @@
+#pragma once
+
 #include <cstdint>
+#include <cstddef>
 
 #include "arch.h"
 
@@ -6,7 +9,7 @@
     #include <immintrin.h>
 #elif defined(__AVX2__)
     #include <immintrin.h>
-#elif defined(__SSE2__)
+#elif defined(__SSE4_1__)
     #include <emmintrin.h>
 #endif
 
@@ -22,9 +25,6 @@ namespace agon::simd {
 
     template<Arch arch>
     struct VecI64;
-
-    template<Arch arch>
-    struct VecBF16;
 
     template<Arch arch>
     struct VecF16;
@@ -80,17 +80,6 @@ namespace agon::simd {
 
         VecF16() = default;
         explicit VecF16(__m512h val) : data(val) {}
-    };
-#endif
-
-#if HAS_BFLOAT16
-    template<>
-    struct VecBF16<Arch::AVX512> {
-        static constexpr size_t size = 32;
-        __m512bh data;
-
-        VecBF16() = default;
-        explicit VecBF16(__m512bh val) : data(val) {}
     };
 #endif
 
@@ -165,9 +154,9 @@ namespace agon::simd {
         VecF64() = default;
         explicit VecF64(__m256d val) : data(val) {}
     };
-#elif defined(__SSE2__)
+#elif defined(__SSE4_1__)
     template<>
-    struct VecI8<Arch::SSE2> {
+    struct VecI8<Arch::SSE4_1> {
         static constexpr size_t size = 16;
         __m128i data;
 
@@ -176,7 +165,7 @@ namespace agon::simd {
     };
 
     template<>
-    struct VecI16<Arch::SSE2> {
+    struct VecI16<Arch::SSE4_1> {
         static constexpr size_t size = 8;
         __m128i data;
 
@@ -185,7 +174,7 @@ namespace agon::simd {
     };
 
     template<>
-    struct VecI32<Arch::SSE2> {
+    struct VecI32<Arch::SSE4_1> {
         static constexpr size_t size = 4;
         __m128i data;
 
@@ -194,7 +183,7 @@ namespace agon::simd {
     };
 
     template<>
-    struct VecI64<Arch::SSE2> {
+    struct VecI64<Arch::SSE4_1> {
         static constexpr size_t size = 2;
         __m128i data;
 
@@ -203,7 +192,7 @@ namespace agon::simd {
     };
 
     template<>
-    struct VecF32<Arch::SSE2> {
+    struct VecF32<Arch::SSE4_1> {
         static constexpr size_t size = 4;
         __m128 data;
 
@@ -212,7 +201,7 @@ namespace agon::simd {
     };
 
     template<>
-    struct VecF64<Arch::SSE2> {
+    struct VecF64<Arch::SSE4_1> {
         static constexpr size_t size = 2;
         __m128d data;
 
@@ -281,12 +270,7 @@ namespace agon::simd {
     using vec_i64 = VecI64<CURRENT_ARCH>;
     using vec_f32 = VecF32<CURRENT_ARCH>;
     using vec_f64 = VecF64<CURRENT_ARCH>;
-
 #if HAS_FLOAT16
     using vec_f16 = VecF16<CURRENT_ARCH>;
-#endif
-
-#if HAS_BFLOAT16
-    using vec_bf16 = VecBF16<CURRENT_ARCH>;
 #endif
 }

@@ -1,9 +1,17 @@
+#pragma once
+
 #include <cstdint>
+
+#if defined(__AVX512FP16__)
+    #define HAS_FLOAT16 1
+#else
+    #define HAS_FLOAT16 0
+#endif
 
 namespace agon::simd {
     enum class Arch : uint8_t {
         GENERIC,
-        SSE2,
+        SSE4_1,
         AVX2,
         AVX512,
     };
@@ -13,8 +21,8 @@ namespace agon::simd {
         return Arch::AVX512;
 #elif defined(__AVX2__)
         return Arch::AVX2;
-#elif defined(__SSE2__)
-        return Arch::SSE2;
+#elif defined(__SSE4_1__)
+        return Arch::SSE4_1;
 #else
         return Arch::GENERIC;
 #endif
@@ -22,15 +30,3 @@ namespace agon::simd {
 
     constexpr Arch CURRENT_ARCH = detect_arch();
 }
-
-#if defined(__AVX512FP16__)
-    #define HAS_FLOAT16 1
-#else
-    #define HAS_FLOAT16 0
-#endif
-
-#if defined(__AVX512BF16__)
-    #define HAS_BFLOAT16 1
-#else
-    #define HAS_BFLOAT16 0
-#endif
