@@ -13,6 +13,10 @@ namespace agon::estim {
     }
 
     void Estimator::clip_grad_norm(double max_norm) {
+        if (max_norm <= 0.0) {
+            return;
+        }
+
         double total_norm_sq = 0.0;
 
         for (IParameter* param : parameters) {

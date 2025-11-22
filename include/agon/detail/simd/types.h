@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <stdfloat>
 
 #include "arch.h"
 
@@ -298,6 +299,12 @@ namespace agon::simd {
     template<Arch arch> struct VecType<int64_t, arch> { using type = VecI64<arch>; };
     template<Arch arch> struct VecType<float, arch> { using type = VecF32<arch>; };
     template<Arch arch> struct VecType<double, arch> { using type = VecF64<arch>; };
+
+    template<Arch arch> struct VecType<std::float32_t, arch> { using type = VecF32<arch>; };
+    template<Arch arch> struct VecType<std::float64_t, arch> { using type = VecF64<arch>; };
+#if HAS_FLOAT16
+    template<Arch arch> struct VecType<std::float16_t, arch> { using type = VecF16<arch>; };
+#endif
 
     template<typename T>
     using vec = typename VecType<T, CURRENT_ARCH>::type;

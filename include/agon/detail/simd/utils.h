@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <stdexcept>
+#include <stdfloat>
+#include <typeinfo>
 
 #include "arch.h"
 
@@ -18,12 +21,15 @@ namespace agon::simd {
 
     template<typename F>
     void dispatch_float(const std::type_info& type, F&& func) {
+#if HAS_FLOAT16
         if (type == typeid(std::float16_t)) {
             func.template operator()<std::float16_t>();
-        } else if (type == typeid(std::float32_t)) {
-            func.template operator()<std::float32_t>();
-        } else if (type == typeid(std::float64_t)) {
-            func.template operator()<std::float64_t>();
+        } else
+#endif
+        if (type == typeid(float) || type == typeid(std::float32_t)) {
+            func.template operator()<float>();
+        } else if (type == typeid(double) || type == typeid(std::float64_t)) {
+            func.template operator()<double>();
         } else {
             throw std::runtime_error("Unsupported data type for SIMD operation");
         }

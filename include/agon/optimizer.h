@@ -1,13 +1,20 @@
 #pragma once
 
 #include "parameter.h"
+#include "detail/simd/arch.h"
 
+#include <variant>
 #include <vector>
 #include <cstdint>
+#include <stdfloat>
 
 namespace agon::optim {
     struct GradData {
+#if HAS_FLOAT16
         std::variant<std::vector<std::float16_t>, std::vector<float>, std::vector<double>> data{};
+#else
+        std::variant<std::vector<float>, std::vector<double>> data{};
+#endif
     };
 
     struct OptimizerState {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "estimator.h"
+#include "../estimator.h"
 
 namespace agon::estim {
     struct RGEParams {
