@@ -8,15 +8,17 @@ namespace agon::estim {
         Params&... params,
         bool two_sided,
         int num_directions
-    ) : options{two_sided, num_directions} {
-        (parameters.push_back(&params), ...);
+    ) : options{two_sided, num_directions}, parameters{ &params... } {
+        state.losses.reserve( (two_sided ? num_directions * 2 : num_directions) );
     }
 
     RGE::RGE(
         std::initializer_list<IParameter*> params,
         bool two_sided,
         int num_directions
-    ) : options{two_sided, num_directions}, parameters(params) {}
+    ) : options{two_sided, num_directions}, parameters(params) {
+        state.losses.reserve( (two_sided ? num_directions * 2 : num_directions) );
+    }
 
     bool RGE::needs_eval() {
         return state.calls % (options.two_sided ? options.num_directions * 2 : options.num_directions) == 0;

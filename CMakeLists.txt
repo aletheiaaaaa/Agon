@@ -13,14 +13,8 @@ option(AGON_ENABLE_AVX512 "Enable AVX512 instructions (if available)" ON)
 option(AGON_ENABLE_AVX2 "Enable AVX2 instructions (if available)" ON)
 option(AGON_ENABLE_SSE4 "Enable SSE4.1 instructions (if available)" ON)
 
-# Source files
-set(AGON_SOURCES
-    src/parameter.cpp
-    src/estimator.cpp
-    src/optimizer.cpp
-    src/optimizers/sgd.cpp
-    src/estimators/rge.cpp
-)
+# Source files (automatically find all .cpp files in src/)
+file(GLOB_RECURSE AGON_SOURCES src/*.cpp)
 
 # Create library target
 if(AGON_BUILD_SHARED)
