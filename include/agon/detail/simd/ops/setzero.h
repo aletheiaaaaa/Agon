@@ -144,4 +144,10 @@ namespace agon::simd {
         return VecF64<Arch::GENERIC>(0.0);
     }
 #endif
+
+    template<typename T>
+        requires ScalarCastable<T>
+    inline vec<T> setzero() {
+        return setzero<vec<T>>();
+    }
 }

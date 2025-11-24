@@ -46,20 +46,20 @@ namespace agon::optim {
                     simd::unroll<unroll_factor>([&]<size_t index>() {
                         constexpr size_t offset = index * vec_size;
 
-                        auto grad_vec = simd::load<simd::vec<G>>(&grad_ptr[i + offset]);
-                        auto mom_vec = simd::load<simd::vec<G>>(&mom_data[i + offset]);
+                        auto grad_vec = simd::load<G>(&grad_ptr[i + offset]);
+                        auto mom_vec = simd::load<G>(&mom_data[i + offset]);
 
                         if (options_.maximize) grad_vec = simd::neg(grad_vec);
 
-                        auto mom_coeff = simd::set1<simd::vec<G>>(static_cast<G>(options_.momentum));
+                        auto mom_coeff = simd::set1<G>(static_cast<G>(options_.momentum));
                         mom_vec = simd::fmadd(mom_coeff, mom_vec, grad_vec);
                         simd::store(&mom_data[i + offset], mom_vec);
 
                         if (options_.nesterov) mom_vec = simd::fmadd(mom_coeff, mom_vec, grad_vec);
 
-                        auto lr_vec = simd::set1<simd::vec<G>>(static_cast<G>(options_.lr));
+                        auto lr_vec = simd::set1<G>(static_cast<G>(options_.lr));
 
-                        auto data_vec = simd::load<simd::vec<G>>(&data_ptr[i + offset]);
+                        auto data_vec = simd::load<G>(&data_ptr[i + offset]);
                         data_vec = simd::fnmadd(lr_vec, mom_vec, data_vec);
                         simd::store(&data_ptr[i + offset], data_vec);
                     });

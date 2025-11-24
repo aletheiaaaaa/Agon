@@ -29,13 +29,13 @@ namespace agon::estim {
                     constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
                     size_t i = 0;
-                    auto sum_vec = simd::setzero<simd::vec<G>>();
+                    auto sum_vec = simd::setzero<G>();
 
                     for (; i + vec_size * unroll_factor <= param_size; i += vec_size * unroll_factor) {
                         simd::unroll<unroll_factor>([&]<size_t index>() {
                             constexpr size_t offset = index * vec_size;
 
-                            auto grad_vec = simd::load<simd::vec<G>>(&grad_ptr[i + offset]);
+                            auto grad_vec = simd::load<G>(&grad_ptr[i + offset]);
                             sum_vec = simd::fmadd(grad_vec, grad_vec, sum_vec);
                         });
                     }
@@ -62,13 +62,12 @@ namespace agon::estim {
                     constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
                     size_t i = 0;
-                    auto scale_vec = simd::set1<simd::vec<G>>(static_cast<G>(scale));
-
+                    auto scale_vec = simd::set1<G>(static_cast<G>(scale));
                     for (; i + vec_size * unroll_factor <= param_size; i += vec_size * unroll_factor) {
                         simd::unroll<unroll_factor>([&]<size_t index>() {
                             constexpr size_t offset = index * vec_size;
 
-                            auto grad_vec = simd::load<simd::vec<G>>(&grad_ptr[i + offset]);
+                            auto grad_vec = simd::load<G>(&grad_ptr[i + offset]);
                             grad_vec = simd::mul(grad_vec, scale_vec);
                             simd::store(&grad_ptr[i + offset], grad_vec);
                         });

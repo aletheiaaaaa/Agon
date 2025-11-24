@@ -145,4 +145,10 @@ namespace agon::simd {
         return VecF64<Arch::GENERIC>(*ptr);
     }
 #endif
+
+    template<typename T>
+        requires ScalarCastable<T>
+    inline vec<T> load(const T* ptr) {
+        return load<vec<T>>(ptr);
+    }
 }

@@ -78,8 +78,8 @@ namespace agon {
             simd::unroll<unroll_factor>([&]<size_t index>() {
                 constexpr size_t offset = index * vec_size;
 
-                auto grad_vec = simd::load<simd::vec<T>>(&grad_[i + offset]);
-                auto new_vec = simd::load<simd::vec<T>>(&new_grad[i + offset]);
+                auto grad_vec = simd::load<T>(&grad_[i + offset]);
+                auto new_vec = simd::load<T>(&new_grad[i + offset]);
                 grad_vec = simd::add(grad_vec, new_vec);
                 simd::store(&grad_[i + offset], grad_vec);
             });
@@ -115,10 +115,10 @@ namespace agon {
             simd::unroll<unroll_factor>([&]<size_t index>() {
                 constexpr size_t offset = index * vec_size;
 
-                auto q_vec = simd::load<simd::vec<Q>>(&data[i + offset]);
-                auto q_float_vec = simd::cast<simd::vec<T>>(q_vec);
-                auto scale_vec = simd::set1<simd::vec<T>>(scale_cast);
-                auto zero_point_vec = simd::set1<simd::vec<T>>(zero_point_cast);
+                auto q_vec = simd::load<Q>(&data[i + offset]);
+                auto q_float_vec = simd::cast<T>(q_vec);
+                auto scale_vec = simd::set1<T>(scale_cast);
+                auto zero_point_vec = simd::set1<T>(zero_point_cast);
 
                 auto val_vec = simd::sub(q_float_vec, zero_point_vec);
                 val_vec = simd::mul(val_vec, scale_vec);
@@ -150,10 +150,10 @@ namespace agon {
             simd::unroll<unroll_factor>([&]<size_t index>() {
                 constexpr size_t offset = index * vec_size;
 
-                auto q_vec = simd::load<simd::vec<Q>>(&data[i + offset]);
-                auto q_float_vec = simd::cast<simd::vec<T>>(q_vec);
-                auto scale_vec = simd::set1<simd::vec<T>>(scale_cast);
-                auto zero_point_vec = simd::set1<simd::vec<T>>(zero_point_cast);
+                auto q_vec = simd::load<Q>(&data[i + offset]);
+                auto q_float_vec = simd::cast<T>(q_vec);
+                auto scale_vec = simd::set1<T>(scale_cast);
+                auto zero_point_vec = simd::set1<T>(zero_point_cast);
 
                 auto val_vec = simd::sub(q_float_vec, zero_point_vec);
                 val_vec = simd::mul(val_vec, scale_vec);
@@ -182,9 +182,9 @@ namespace agon {
             simd::unroll<unroll_factor>([&]<size_t index>() {
                 constexpr size_t offset = index * vec_size;
 
-                auto val_vec = simd::load<simd::vec<T>>(&vals[i + offset]);
-                auto inv_scale_vec = simd::set1<simd::vec<T>>(inv_scale);
-                auto zero_point_vec = simd::set1<simd::vec<T>>(zero_point_cast);
+                auto val_vec = simd::load<T>(&vals[i + offset]);
+                auto inv_scale_vec = simd::set1<T>(inv_scale);
+                auto zero_point_vec = simd::set1<T>(zero_point_cast);
                 auto q_vec = simd::fmadd(val_vec, inv_scale_vec, zero_point_vec);
 
                 if constexpr (simd::IsUpcast<T, Q>) {
@@ -192,11 +192,11 @@ namespace agon {
                     for (size_t j = 0; j < mult; ++j) {
                         size_t sub_offset = j * simd::vec<Q>::size;
 
-                        auto sub_q_vec = simd::cast<simd::vec<Q>, j>(q_vec);
+                        auto sub_q_vec = simd::cast<Q, j>(q_vec);
                         simd::store(&quantized_data[i + offset + sub_offset], sub_q_vec);
                     }
                 } else {
-                    q_vec = simd::cast<simd::vec<Q>>(q_vec);
+                    q_vec = simd::cast<Q>(q_vec);
                     simd::store(&quantized_data[i + offset], q_vec);
                 }
             });
@@ -225,10 +225,10 @@ namespace agon {
             simd::unroll<unroll_factor>([&]<size_t index>() {
                 constexpr size_t offset = index * vec_size;
                 
-                auto val_vec = simd::load<simd::vec<T>>(&vals[i + offset]);
-                auto scale_vec = simd::set1<simd::vec<T>>(scale_);
-                auto inv_scale_vec = simd::set1<simd::vec<T>>(inv_scale);
-                auto zero_point_vec = simd::set1<simd::vec<T>>(zero_point_cast);
+                auto val_vec = simd::load<T>(&vals[i + offset]);
+                auto scale_vec = simd::set1<T>(scale_);
+                auto inv_scale_vec = simd::set1<T>(inv_scale);
+                auto zero_point_vec = simd::set1<T>(zero_point_cast);
 
                 auto q_vec = simd::fmadd(val_vec, inv_scale_vec, zero_point_vec);
                 q_vec = simd::round(q_vec);
