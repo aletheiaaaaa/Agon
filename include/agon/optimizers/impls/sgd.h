@@ -41,7 +41,4 @@ namespace agon::optim {
             SGDParams options_;
             SGDState<Ts...> state_;
     };
-
-    extern template class SGD<std::tuple<agon::Parameter<float>>>;
-    extern template class SGD<std::tuple<agon::Parameter<double>>>;
 }

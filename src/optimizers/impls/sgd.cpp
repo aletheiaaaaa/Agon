@@ -104,4 +104,5 @@ namespace agon::optim {
     template class SGD<std::tuple<agon::Parameter<float>>>;
     template class SGD<std::tuple<agon::Parameter<double>>>;
     template class SGD<std::tuple<agon::Parameter<float>, agon::Parameter<double>>>;
+    template class SGD<std::tuple<agon::Parameter<double>, agon::Parameter<float>>>;
 }

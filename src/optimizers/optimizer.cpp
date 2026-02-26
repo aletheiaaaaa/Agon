@@ -14,4 +14,5 @@ namespace agon::optim {
     template class Optimizer<std::tuple<agon::Parameter<float>>>;
     template class Optimizer<std::tuple<agon::Parameter<double>>>;
     template class Optimizer<std::tuple<agon::Parameter<float>, agon::Parameter<double>>>;
+    template class Optimizer<std::tuple<agon::Parameter<double>, agon::Parameter<float>>>;
 }

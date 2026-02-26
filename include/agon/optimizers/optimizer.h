@@ -35,7 +35,4 @@ namespace agon::optim {
             OptimizerState state_;
             ParameterPack<Ts...> parameters_;
     };
-
-    extern template class Optimizer<std::tuple<agon::Parameter<float>>>;
-    extern template class Optimizer<std::tuple<agon::Parameter<double>>>;
 }

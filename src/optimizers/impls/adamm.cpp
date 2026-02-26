@@ -120,4 +120,9 @@ namespace agon::optim {
             }), ...);
         }, this->parameters_.data);
     }
+
+    template class AdaMM<std::tuple<agon::Parameter<float>>>;
+    template class AdaMM<std::tuple<agon::Parameter<double>>>;
+    template class AdaMM<std::tuple<agon::Parameter<float>, agon::Parameter<double>>>;
+    template class AdaMM<std::tuple<agon::Parameter<double>, agon::Parameter<float>>>;
 }
