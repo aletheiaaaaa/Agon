@@ -1,4 +1,4 @@
-#include "agon/core/parameter.h"
+#include "agon/parameter.h"
 #include "agon/detail/simd/ops.h"
 #include "agon/detail/simd/utils.h"
 

@@ -1,10 +1,14 @@
 #include "agon/optimizers/impls/sgd.h"
 
-namespace agon::optim {
+#include "agon/detail/simd/ops.h"
+#include "agon/detail/simd/utils.h"
 
+#include <fstream>
+#include <filesystem>
+
+namespace agon::optim {
     template<typename... Ts>
     void SGD<Ts...>::step() {
-
         std::apply([&](auto&... param_vecs) {
             (std::ranges::for_each(param_vecs.begin(), param_vecs.end(), [&](auto& param_ref) {
                 auto& param = param_ref.get();
