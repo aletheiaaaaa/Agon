@@ -18,7 +18,7 @@ add_library(agon STATIC ${AGON_SOURCES})
 add_library(agon::agon ALIAS agon)
 
 # Require C++20 for concepts
-target_compile_features(agon PUBLIC cxx_std_20)
+target_compile_features(agon PUBLIC cxx_std_23)
 
 # Include directories
 target_include_directories(agon

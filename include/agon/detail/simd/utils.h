@@ -10,29 +10,28 @@
 #include "types.h"
 
 namespace agon::simd {
-    template<typename F, typename T>
-    concept IsUpcast = 
-        simd::vec<F>::size < simd::vec<T>::size;
+  template<typename F, typename T>
+  concept IsUpcast = simd::vec<F>::size < simd::vec<T>::size;
 
-    constexpr int UNROLL_FACTOR = 
-        (CURRENT_ARCH == Arch::AVX512) ? 4 :
-        (CURRENT_ARCH == Arch::AVX2) ? 2 : 1;
+  constexpr int UNROLL_FACTOR = 
+    (CURRENT_ARCH == Arch::AVX512) ? 4 :
+    (CURRENT_ARCH == Arch::AVX2) ? 2 : 1;
 
-    template<size_t N, typename F>
-    constexpr void unroll(F&& func) {
-        [&]<size_t... Is>(std::index_sequence<Is...>) {
-            (func.template operator()<Is>(), ...);
-        }(std::make_index_sequence<N>{});
+  template<size_t N, typename F>
+  constexpr void unroll(F&& func) {
+    [&]<size_t... Is>(std::index_sequence<Is...>) {
+      (func.template operator()<Is>(), ...);
+    }(std::make_index_sequence<N>{});
+  }
+
+  template<typename T, typename F>
+  constexpr void dispatch(F&& func) {
+    if (std::is_same_v<T, float>) {
+      func.template operator()<float>();
+    } else if (std::is_same_v<T, double>) {
+      func.template operator()<double>();
+    } else {
+      throw std::runtime_error("Unsupported data type for SIMD operation");
     }
-
-    template<typename T, typename F>
-    constexpr void dispatch(F&& func) {
-        if (std::is_same_v<T, float>) {
-            func.template operator()<float>();
-        } else if (std::is_same_v<T, double>) {
-            func.template operator()<double>();
-        } else {
-            throw std::runtime_error("Unsupported data type for SIMD operation");
-        }
-    }
+  }
 }
