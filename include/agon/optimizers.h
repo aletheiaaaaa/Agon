@@ -5,3 +5,4 @@
 #include "optimizers/impls/adam.h"
 #include "optimizers/impls/sarah.h"
 #include "optimizers/impls/lion.h"
+#include "optimizers/impls/svrg.h"
