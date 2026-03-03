@@ -32,7 +32,7 @@ namespace agon {
     size_t start, end;
 
     Slice(size_t idx) : start(idx), end(idx) {};
-    Slice(size_t idx0, size_t idx1) : start(idx0), end(idx1 - 1) {};
+    Slice(size_t idx0, size_t idx1) : start(idx0), end(idx1) {};
     Slice() : start(Start), end(End) {};
   };
 
@@ -45,16 +45,17 @@ namespace agon {
 
     inline ViewParams compute_view(
       std::span<const Slice> slices,
-      std::span<const size_t> src_shape, 
+      std::span<const size_t> src_shape,
       std::span<const size_t> src_strides
     ) {
       size_t offset = 0;
+
       std::vector<size_t> shape;
       std::vector<size_t> strides;
+
       for (const auto& [idx, slice] : std::views::enumerate(slices)) {
-        assert((slice.end - 1 < src_shape[idx] || slice.end == Slice::End) && "Array index out of bounds");
-        assert((slice.start <= slice.end - 1) && "Slice should begin before it ends");
-        assert((slices.size() == src_shape.size()) && "There should be as many slices as dimensions");
+        assert((slice.end <= src_shape[idx] || slice.end == Slice::End) && "Array index out of bounds");
+        assert((slice.start <= slice.end + 1) && "Slice should begin before it ends");
 
         offset += slice.start * src_strides[idx];
         size_t dim_size = std::min(slice.end, src_shape[idx]) - slice.start;
@@ -69,6 +70,33 @@ namespace agon {
         .shape = std::move(shape),
         .strides = std::move(strides)
       };
+    }
+
+    inline std::vector<int> compute_indices(
+      size_t offset,
+      std::span<const size_t> shape,
+      std::span<const size_t> strides
+    ) {
+      size_t out_numel = std::accumulate(shape.begin(), shape.end(), size_t{1}, std::multiplies<size_t>{});
+      std::vector<int> indices(out_numel, 0);
+      std::vector<int> coord(shape.size(), 0);
+
+      size_t current_idx = offset;
+      for (size_t i = 0; i < out_numel; ++i) {
+        indices[i] = current_idx;
+
+        for (size_t d = shape.size(); d-- > 0; ) {
+          coord[d]++;
+          current_idx += strides[d];
+
+          if (coord[d] < shape[d]) break;
+
+          coord[d] = 0;
+          current_idx -= shape[d] * strides[d];
+        }
+      }
+
+      return indices;
     }
   }
 
@@ -86,67 +114,70 @@ namespace agon {
     size_t offset;
     std::vector<size_t> shape;
     std::vector<size_t> strides;
+    std::vector<int> indices;
+
+    std::vector<int>& ensure_indices() {
+      if (indices.empty() && !shape.empty()) {
+        indices = detail::compute_indices(offset, shape, strides);
+      }
+      return indices;
+    }
 
     template<typename... Args>
       requires (std::convertible_to<Args, Slice> && ...)
     View<T> operator[](Args... args) {
-      std::array<Slice, sizeof...(Args)> slices{args...};
+      std::vector<Slice> slices{args...};
+      assert((slices.size() <= shape.size()) && "There cannot be more slices than dimensions");
+      while (slices.size() < shape.size()) {
+        slices.emplace_back();
+      }
 
       auto params = detail::compute_view(slices, shape, strides);
       return View<T>{
         .ref = ref,
         .offset = offset + params.offset,
         .shape = std::move(params.shape),
-        .strides = std::move(params.strides)
+        .strides = std::move(params.strides),
       };
     }
 
     template<typename... Args>
       requires (std::convertible_to<Args, Slice> && ...)
     const View<const T> operator[](Args... args) const {
-      std::array<Slice, sizeof...(Args)> slices{args...};
+      std::vector<Slice> slices{args...};
+      assert((slices.size() <= shape.size()) && "There cannot be more slices than dimensions");
+      while (slices.size() < shape.size()) {
+        slices.emplace_back();
+      }
 
       auto params = detail::compute_view(slices, shape, strides);
       return View<const T>{
         .ref = std::cref(ref.get()),
         .offset = offset + params.offset,
         .shape = std::move(params.shape),
-        .strides = std::move(params.strides)
+        .strides = std::move(params.strides),
       };
     }
 
-    std::vector<T> materialize() const {
+    std::vector<T> materialize() {
+      auto& idx = ensure_indices();
       std::vector<T> result(numel());
 
       constexpr size_t vec_size = simd::vec<T>::size;
       const size_t unroll_factor = simd::UNROLL_FACTOR;
 
-      std::vector<int> idx(numel(), 0);
-      std::vector<int> coord(shape.size(), 0);
-
-      size_t current_idx = offset;
-      for (size_t i = 0; i < numel(); ++i) {
-        idx[i] = current_idx;
-
-        for (size_t d = shape.size(); d-- > 0; ) {
-          coord[d]++;
-          current_idx += strides[d];
-
-          if (coord[d] < shape[d]) break;
-
-          coord[d] = 0;
-          current_idx -= shape[d] * strides[d]; 
-        }
-      }
-
-      for (int i = 0; i + vec_size * unroll_factor <= result.size(); i += vec_size * unroll_factor) {
+      int i = 0;
+      for (; i + vec_size * unroll_factor <= result.size(); i += vec_size * unroll_factor) {
         simd::unroll<unroll_factor>([&]<size_t index>() {
           constexpr size_t off = index * vec_size;
 
-          auto indices = simd::load<int32_t>(&idx[off]);
-          auto vals = simd::gather<T>(&data()[0], indices);
-          simd::store(&result[off], vals);
+          auto vals = simd::gather<T>(&data()[0], &idx[i + off]);
+          simd::store(&result[i + off], vals);
         });
+      }
+
+      for (; i < numel(); ++i) {
+        result[i] = data()[idx[i]];
       }
 
       return result;
@@ -154,37 +185,52 @@ namespace agon {
 
     void fill(const std::span<T>& new_data) {
       assert(new_data.size() == numel() && "Data size does not match view size");
+      auto& idx = ensure_indices();
 
       constexpr size_t vec_size = simd::vec<T>::size;
       const size_t unroll_factor = simd::UNROLL_FACTOR;
 
-      std::vector<int> idx(numel(), 0);
-      std::vector<int> coord(shape.size(), 0);
-
-      size_t current_idx = offset;
-      for (size_t i = 0; i < numel(); ++i) {
-        idx[i] = current_idx;
-
-        for (size_t d = shape.size(); d-- > 0; ) {
-          coord[d]++;
-          current_idx += strides[d];
-
-          if (coord[d] < shape[d]) break;
-
-          coord[d] = 0;
-          current_idx -= shape[d] * strides[d]; 
-        }
-      }
-
-      for (int i = 0; i + vec_size * unroll_factor <= new_data.size(); i += vec_size * unroll_factor) {
+      int i = 0;
+      for (; i + vec_size * unroll_factor <= new_data.size(); i += vec_size * unroll_factor) {
         simd::unroll<unroll_factor>([&]<size_t index>() {
           constexpr size_t off = index * vec_size;
 
-          auto vals = simd::load<T>(&new_data[off]);
-          auto indices = simd::load<int32_t>(&idx[off]);
-          simd::scatter(&data()[0], indices, vals);
-        });
+          auto vals = simd::load<T>(&new_data[i + off]);
+          simd::scatter(&data()[0], &idx[i + off], vals);
+      });
       }
+
+      for (; i < new_data.size(); ++i) {
+        data()[idx[i]] = new_data[i];
+      }
+    }
+
+    template<typename S>
+      requires detail::NestedSpan<S, T>
+    View& operator=(const S& new_data) {
+      auto new_shape = detail::deduce_shape(new_data);
+      assert(new_shape == shape && "Cannot assign to view with data of different shape");
+      auto& idx = ensure_indices();
+
+      detail::fill(new_data, new_shape, [&](const auto& leaf, size_t offset) {
+        int i = 0;
+
+        constexpr size_t vec_size = simd::vec<T>::size;
+        constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
+
+        for (; i + vec_size * unroll_factor <= leaf.size(); i += vec_size * unroll_factor) {
+          simd::unroll<unroll_factor>([&]<size_t index>() {
+            constexpr size_t off = index * vec_size;
+
+            auto vals = simd::load<T>(&leaf[i + off]);
+            simd::scatter(&data()[0], &idx[offset + i + off], vals);
+          });
+        }
+        for (; i < leaf.size(); ++i) {
+          data()[idx[offset + i]] = leaf[i];
+        }
+      });
+      return *this;
     }
 
     std::vector<T>& grad() { return ref.get().grad(); }
@@ -262,38 +308,46 @@ namespace agon {
       template<typename... Args>
         requires (std::convertible_to<Args, Slice> && ...)
       View<T> operator[](Args... args) {
-        std::array<Slice, sizeof...(Args)> slices{args...};
+        std::vector<Slice> slices{args...};
+        assert((slices.size() <= shape_.size()) && "There cannot be more slices than dimensions");
+        while (slices.size() < shape_.size()) {
+          slices.emplace_back();
+        }
 
         auto params = detail::compute_view(slices, shape_, strides_);
         return View<T>{
           .ref = *this,
           .offset = params.offset,
           .shape = std::move(params.shape),
-          .strides = std::move(params.strides)
+          .strides = std::move(params.strides),
         };
       }
 
       template<typename... Args>
         requires (std::convertible_to<Args, Slice> && ...)
       const View<const T> operator[](Args... args) const {
-        std::array<Slice, sizeof...(Args)> slices{args...};
+        std::vector<Slice> slices{args...};
+        assert((slices.size() <= shape_.size()) && "There cannot be more slices than dimensions");
+        while (slices.size() < shape_.size()) {
+          slices.emplace_back();
+        }
 
         auto params = detail::compute_view(slices, shape_, strides_);
         return View<const T>{
           .ref = *this,
           .offset = params.offset,
           .shape = std::move(params.shape),
-          .strides = std::move(params.strides)
+          .strides = std::move(params.strides),
         };
       }
 
       template<typename S>
         requires detail::NestedSpan<S, T>
-      void fill(const S& span) {
-        auto new_shape = detail::deduce_shape(span);
+      void fill(const S& new_data) {
+        auto new_shape = detail::deduce_shape(new_data);
         assert(new_shape == shape_ && "Cannot fill parameter with data of different shape");
 
-        detail::fill(span, new_shape, [&](const auto& leaf, size_t offset) {
+        detail::fill(new_data, new_shape, [&](const auto& leaf, size_t offset) {
           std::copy(leaf.begin(), leaf.end(), data_.begin() + offset);
         });
       }
