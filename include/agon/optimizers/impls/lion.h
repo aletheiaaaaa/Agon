@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../optimizer.h"
-#include "../../detail/simd/ops.h"
 #include "../../detail/simd/utils.h"
+#include <eve/module/core.hpp>
 
 #include <cstring>
 #include <cmath>
@@ -59,7 +59,7 @@ namespace agon::optim {
               auto& grad_full = param.grad();
               auto& data_full = param.data();
 
-              constexpr size_t vec_size = simd::vec<T>::size;
+              constexpr size_t vec_size = eve::wide<T>::size();
               constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
               size_t i = 0;
@@ -67,25 +67,25 @@ namespace agon::optim {
                 simd::unroll<unroll_factor>([&]<size_t index>(){
                   constexpr size_t offset = index * vec_size;
 
-                  auto grad = simd::load<T>(&grad_full[i + offset]);
-                  auto mom = simd::load<T>(&mom_full[state_offset + i + offset]);
+                  eve::wide<T> grad(&grad_full[i + offset]);
+                  eve::wide<T> mom(&mom_full[state_offset + i + offset]);
 
-                  if (options_.maximize) grad = simd::neg(grad);
+                  if (options_.maximize) grad = -grad;
 
-                  auto beta1 = simd::set1<T>(options_.beta1);
-                  auto update = simd::fmadd(beta1, mom, grad);
-                  update = simd::fnmadd(beta1, grad, mom);
+                  eve::wide<T> beta1(options_.beta1);
+                  auto update = eve::fma(beta1, mom, grad);
+                  update = eve::fnma(beta1, grad, mom);
 
-                  auto data = simd::load<T>(&data_full[i + offset]);
+                  eve::wide<T> data(&data_full[i + offset]);
 
-                  if (options_.lambda) update = simd::fnmadd(simd::set1<T>(options_.lambda), data, update);
-                  data = simd::fmadd(simd::set1<T>(options_.lr), simd::sign(update), data);
-                  simd::store(&data_full[i + offset], data);
+                  if (options_.lambda) update = eve::fnma(eve::wide<T>(options_.lambda), data, update);
+                  data = eve::fma(eve::wide<T>(options_.lr), eve::sign(update), data);
+                  eve::store(data, &data_full[i + offset]);
 
-                  auto beta2 = simd::set1<T>(options_.beta2);
-                  mom = simd::fmadd(beta2, mom, grad);
-                  mom = simd::fnmadd(beta2, grad, mom);
-                  simd::store(&mom_full[state_offset + i + offset], mom);
+                  eve::wide<T> beta2(options_.beta2);
+                  mom = eve::fma(beta2, mom, grad);
+                  mom = eve::fnma(beta2, grad, mom);
+                  eve::store(mom, &mom_full[state_offset + i + offset]);
                 });
               }
 

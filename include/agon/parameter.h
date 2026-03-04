@@ -19,7 +19,7 @@
 #include <fstream>
 
 #include "detail/simd/utils.h"
-#include "detail/simd/ops.h"
+#include <eve/module/core.hpp>
 #include "detail/dedup.h"
 #include "detail/unpack.h"
 
@@ -162,7 +162,7 @@ namespace agon {
       auto& idx = ensure_indices();
       std::vector<T> result(numel());
 
-      constexpr size_t vec_size = simd::vec<T>::size;
+      constexpr size_t vec_size = eve::wide<T>::size();
       const size_t unroll_factor = simd::UNROLL_FACTOR;
 
       int i = 0;
@@ -170,8 +170,9 @@ namespace agon {
         simd::unroll<unroll_factor>([&]<size_t index>() {
           constexpr size_t off = index * vec_size;
 
-          auto vals = simd::gather<T>(&data()[0], &idx[i + off]);
-          simd::store(&result[i + off], vals);
+          eve::wide<int32_t, eve::fixed<vec_size>> idx_wide(&idx[i + off]);
+          auto vals = eve::gather(data().data(), idx_wide);
+          eve::store(vals, &result[i + off]);
         });
       }
 
@@ -186,7 +187,7 @@ namespace agon {
       assert(new_data.size() == numel() && "Data size does not match view size");
       auto& idx = ensure_indices();
 
-      constexpr size_t vec_size = simd::vec<T>::size;
+      constexpr size_t vec_size = eve::wide<T>::size();
       const size_t unroll_factor = simd::UNROLL_FACTOR;
 
       int i = 0;
@@ -194,8 +195,10 @@ namespace agon {
         simd::unroll<unroll_factor>([&]<size_t index>() {
           constexpr size_t off = index * vec_size;
 
-          auto vals = simd::load<T>(&new_data[i + off]);
-          simd::scatter(&data()[0], &idx[i + off], vals);
+          eve::wide<T> vals(&new_data[i + off]);
+          for (size_t k = 0; k < vec_size; ++k) {
+            data()[idx[i + off + k]] = vals.get(k);
+          }
       });
       }
 
@@ -214,15 +217,17 @@ namespace agon {
       detail::fill(new_data, new_shape, [&](const auto& leaf, size_t offset) {
         int i = 0;
 
-        constexpr size_t vec_size = simd::vec<T>::size;
+        constexpr size_t vec_size = eve::wide<T>::size();
         constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
         for (; i + vec_size * unroll_factor <= leaf.size(); i += vec_size * unroll_factor) {
           simd::unroll<unroll_factor>([&]<size_t index>() {
             constexpr size_t off = index * vec_size;
 
-            auto vals = simd::load<T>(&leaf[i + off]);
-            simd::scatter(&data()[0], &idx[offset + i + off], vals);
+            eve::wide<T> vals(&leaf[i + off]);
+            for (size_t k = 0; k < vec_size; ++k) {
+              data()[idx[offset + i + off + k]] = vals.get(k);
+            }
           });
         }
         for (; i < leaf.size(); ++i) {
@@ -356,7 +361,7 @@ namespace agon {
       }
 
       void accumulate(const std::vector<T>& new_grad) {
-        constexpr size_t vec_size = simd::vec<T>::size;
+        constexpr size_t vec_size = eve::wide<T>::size();
         constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
         size_t i = 0;
@@ -364,10 +369,10 @@ namespace agon {
           simd::unroll<unroll_factor>([&]<size_t index>() {
             constexpr size_t offset = index * vec_size;
 
-            auto grad_vec = simd::load<T>(&grad_[i + offset]);
-            auto new_vec = simd::load<T>(&new_grad[i + offset]);
-            grad_vec = simd::add(grad_vec, new_vec);
-            simd::store(&grad_[i + offset], grad_vec);
+            eve::wide<T> grad_vec(&grad_[i + offset]);
+            eve::wide<T> new_vec(&new_grad[i + offset]);
+            grad_vec = eve::add(grad_vec, new_vec);
+            eve::store(grad_vec, &grad_[i + offset]);
           });
         }
 
@@ -438,30 +443,20 @@ namespace agon {
             T scale_cast = static_cast<T>(scale);
             T zero_point_cast = static_cast<T>(zero_point);
 
-            constexpr size_t q_vec_size = simd::vec<Q>::size;
-            constexpr size_t f_vec_size = simd::vec<T>::size;
-            constexpr size_t num_slices = q_vec_size / f_vec_size;
-            constexpr size_t unroll_factor = std::min(num_slices, 4UL);
+            constexpr size_t f_vec_size = eve::wide<T>::size();
 
             int i = 0;
-            for (; i + q_vec_size <= leaf.size(); i += q_vec_size) {
-              auto scale_vec = simd::set1<T>(scale_cast);
-              auto zero_point_vec = simd::set1<T>(zero_point_cast);
+            for (; i + f_vec_size <= leaf.size(); i += f_vec_size) {
+              eve::wide<T> scale_vec(scale_cast);
+              eve::wide<T> zero_point_vec(zero_point_cast);
 
-              auto q_vec = simd::load<Q>(&leaf[i]);
-              int j = 0;
-              for (; j + unroll_factor <= num_slices; j += unroll_factor) {
-                simd::unroll<unroll_factor>([&]<size_t slice>() {
-                  constexpr size_t offset0 = slice * f_vec_size;
+              eve::wide<Q, eve::fixed<f_vec_size>> q_chunk(leaf.data() + i);
+              auto q_float_vec = eve::convert(q_chunk, eve::as<T>{});
 
-                  auto q_float_vec = simd::cast<T, slice>(q_vec);
+              auto val_vec = eve::sub(q_float_vec, zero_point_vec);
+              val_vec = eve::mul(val_vec, scale_vec);
 
-                  auto val_vec = simd::sub(q_float_vec, zero_point_vec);
-                  val_vec = simd::mul(val_vec, scale_vec);
-
-                  simd::store(&this->data_[i + j + offset + offset0], val_vec);
-                });
-              }
+              eve::store(val_vec, &this->data_[offset + i]);
             }
 
             for (; i < leaf.size(); ++i) {
@@ -477,7 +472,7 @@ namespace agon {
         T inv_scale = static_cast<T>(1.0f / scale_);
         T zero_point_cast = static_cast<T>(zero_point_);
 
-        constexpr size_t vec_size = simd::vec<T>::size;
+        constexpr size_t vec_size = eve::wide<T>::size();
         constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
         size_t i = 0;
@@ -485,12 +480,12 @@ namespace agon {
           simd::unroll<unroll_factor>([&]<size_t index>() {
             constexpr size_t offset = index * vec_size;
 
-            auto val_vec = simd::load<T>(&vals[i + offset]);
-            auto inv_scale_vec = simd::set1<T>(inv_scale);
-            auto zero_point_vec = simd::set1<T>(zero_point_cast);
-            auto q_vec = simd::fmadd(val_vec, inv_scale_vec, zero_point_vec);
+            eve::wide<T> val_vec(&vals[i + offset]);
+            eve::wide<T> inv_scale_vec(inv_scale);
+            eve::wide<T> zero_point_vec(zero_point_cast);
+            auto q_vec = eve::fma(val_vec, inv_scale_vec, zero_point_vec);
 
-            simd::store(&quantized_data[i + offset], simd::cast<Q>(q_vec));
+            eve::store(eve::convert(q_vec, eve::as<Q>{}), &quantized_data[i + offset]);
           });
         }
 
@@ -508,7 +503,7 @@ namespace agon {
         T inv_scale = static_cast<T>(1.0f / scale_);
         T zero_point_cast = static_cast<T>(zero_point_);
 
-        constexpr size_t vec_size = simd::vec<T>::size;
+        constexpr size_t vec_size = eve::wide<T>::size();
         constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
         size_t i = 0;
@@ -516,17 +511,17 @@ namespace agon {
           simd::unroll<unroll_factor>([&]<size_t index>() {
             constexpr size_t offset = index * vec_size;
 
-            auto val_vec = simd::load<T>(&vals[i + offset]);
-            auto scale_vec = simd::set1<T>(scale_);
-            auto inv_scale_vec = simd::set1<T>(inv_scale);
-            auto zero_point_vec = simd::set1<T>(zero_point_cast);
+            eve::wide<T> val_vec(&vals[i + offset]);
+            eve::wide<T> scale_vec(scale_);
+            eve::wide<T> inv_scale_vec(inv_scale);
+            eve::wide<T> zero_point_vec(zero_point_cast);
 
-            auto q_vec = simd::fmadd(val_vec, inv_scale_vec, zero_point_vec);
-            q_vec = simd::round(q_vec);
+            auto q_vec = eve::fma(val_vec, inv_scale_vec, zero_point_vec);
+            q_vec = eve::nearest(q_vec);
 
-            auto dq_vec = simd::sub(q_vec, zero_point_vec);
-            dq_vec = simd::mul(dq_vec, scale_vec);
-            simd::store(&fake_quantized_data[i + offset], dq_vec);
+            auto dq_vec = eve::sub(q_vec, zero_point_vec);
+            dq_vec = eve::mul(dq_vec, scale_vec);
+            eve::store(dq_vec, &fake_quantized_data[i + offset]);
           });
         }
 

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../optimizer.h"
-#include "../../detail/simd/ops.h"
 #include "../../detail/simd/utils.h"
+#include <eve/module/core.hpp>
 
 #include <cstring>
 #include <algorithm>
@@ -73,7 +73,7 @@ namespace agon::optim {
               auto& grad_full = param.grad();
               auto& data_full = param.data();
 
-              constexpr size_t vec_size = simd::vec<T>::size;
+              constexpr size_t vec_size = eve::wide<T>::size();
               constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
               size_t i = 0;
@@ -81,21 +81,21 @@ namespace agon::optim {
                 simd::unroll<unroll_factor>([&]<size_t index>() {
                   constexpr size_t off = index * vec_size;
 
-                  auto grad = simd::load<T>(&grad_full[i + off]);
-                  if (options_.maximize) grad = simd::neg(grad);
+                  eve::wide<T> grad(&grad_full[i + off]);
+                  if (options_.maximize) grad = -grad;
 
                   auto update = [&](){
                     if ((options_.recompute_every != -1) && state_.step % options_.recompute_every == 0) return grad;
 
-                    auto ref_exact = simd::load<T>(&ref_exact_full[state_offset + i + off]);
-                    auto ref_est = simd::load<T>(&ref_est_full[state_offset + i + off]);
+                    eve::wide<T> ref_exact(&ref_exact_full[state_offset + i + off]);
+                    eve::wide<T> ref_est(&ref_est_full[state_offset + i + off]);
 
-                    return simd::add(simd::sub(grad, ref_est), ref_exact);
+                    return eve::add(eve::sub(grad, ref_est), ref_exact);
                   };
 
-                  auto data = simd::load<T>(&data_full[i + off]);
-                  data = simd::fmadd(simd::set1<T>(options_.lr), update, data);
-                  simd::store(&data_full[i + off], data);
+                  eve::wide<T> data(&data_full[i + off]);
+                  data = eve::fma(eve::wide<T>(options_.lr), update, data);
+                  eve::store(data, &data_full[i + off]);
                 });
               }
 

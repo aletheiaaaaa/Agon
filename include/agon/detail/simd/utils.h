@@ -7,11 +7,11 @@
 #include <typeinfo>
 
 #include "arch.h"
-#include "types.h"
+#include <eve/wide.hpp>
 
 namespace agon::simd {
   template<typename F, typename T>
-  concept IsUpcast = Vec<CURRENT_ARCH, F>::size < simd::Vec<CURRENT_ARCH, T>::size;
+  concept IsUpcast = eve::wide<F>::size() < eve::wide<T>::size();
 
   constexpr int UNROLL_FACTOR = 
     (CURRENT_ARCH == Arch::AVX512) ? 4 :

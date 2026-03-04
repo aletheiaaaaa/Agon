@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../optimizer.h"
-#include "../../detail/simd/ops.h"
 #include "../../detail/simd/utils.h"
+#include <eve/module/core.hpp>
 
 #include <cstring>
 #include <algorithm>
@@ -63,7 +63,7 @@ namespace agon::optim {
               auto& grad_full = param.grad();
               auto& data_full = param.data();
 
-              constexpr size_t vec_size = simd::vec<T>::size;
+              constexpr size_t vec_size = eve::wide<T>::size();
               constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
               size_t i = 0;
@@ -71,23 +71,23 @@ namespace agon::optim {
                 simd::unroll<unroll_factor>([&]<size_t index>() {
                   constexpr size_t offset = index * vec_size;
 
-                  auto grad = simd::load<T>(&grad_full[i + offset]);
-                  if (options_.maximize) grad = simd::neg(grad);
+                  eve::wide<T> grad(&grad_full[i + offset]);
+                  if (options_.maximize) grad = -grad;
 
                   auto update = [&](){
                     if ((options_.recompute_every != -1) && state_.step % options_.recompute_every == 0) return grad;
 
-                    auto prev_grad = simd::load<T>(&prev_grad_full[state_offset + i + offset]);
-                    auto prev_update = simd::load<T>(&prev_update_full[state_offset + i + offset]);
+                    eve::wide<T> prev_grad(&prev_grad_full[state_offset + i + offset]);
+                    eve::wide<T> prev_update(&prev_update_full[state_offset + i + offset]);
 
-                    return simd::add(simd::sub(grad, prev_grad), prev_update);
+                    return eve::add(eve::sub(grad, prev_grad), prev_update);
                   }();
 
-                  auto data = simd::load<T>(&data_full[i + offset]);
-                  data = simd::fmadd(simd::set1<T>(options_.lr), update, data);
+                  eve::wide<T> data(&data_full[i + offset]);
+                  data = eve::fma(eve::wide<T>(options_.lr), update, data);
 
-                  simd::store(&data_full[i + offset], data);
-                  simd::store(&prev_grad_full[state_offset + i + offset], grad);
+                  eve::store(data, &data_full[i + offset]);
+                  eve::store(grad, &prev_grad_full[state_offset + i + offset]);
                 });
               }
 

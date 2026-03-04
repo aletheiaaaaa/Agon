@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../optimizer.h"
-#include "../../detail/simd/ops.h"
 #include "../../detail/simd/utils.h"
+#include <eve/module/core.hpp>
 
 #include <cstring>
 #include <algorithm>
@@ -56,7 +56,7 @@ namespace agon::optim {
               auto& grad_full = param.grad();
               auto& data_full = param.data();
 
-              constexpr size_t vec_size = simd::vec<T>::size;
+              constexpr size_t vec_size = eve::wide<T>::size();
               constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
               size_t i = 0;
@@ -64,24 +64,24 @@ namespace agon::optim {
                 simd::unroll<unroll_factor>([&]<size_t index>() {
                   constexpr size_t offset = index * vec_size;
 
-                  auto grad = simd::load<T>(&grad_full[i + offset]);
-                  auto mom = simd::load<T>(&mom_full[state_offset + i + offset]);
+                  eve::wide<T> grad(&grad_full[i + offset]);
+                  eve::wide<T> mom(&mom_full[state_offset + i + offset]);
 
-                  if (options_.maximize) grad = simd::neg(grad);
+                  if (options_.maximize) grad = -grad;
 
                   auto update = [&](){
                     if (!options_.momentum) return grad;
 
-                    mom = simd::fmadd(simd::set1<T>(options_.momentum), mom, grad);
-                    simd::store(&mom_full[state_offset + i + offset], mom);
+                    mom = eve::fma(eve::wide<T>(options_.momentum), mom, grad);
+                    eve::store(mom, &mom_full[state_offset + i + offset]);
 
-                    if (options_.nesterov) return simd::fmadd(simd::set1<T>(options_.momentum), mom, grad);
+                    if (options_.nesterov) return eve::fma(eve::wide<T>(options_.momentum), mom, grad);
                     else return mom;
                   }();
 
-                  auto data = simd::load<T>(&data_full[i + offset]);
-                  data = simd::fmadd(simd::set1<T>(options_.lr), update, data);
-                  simd::store(&data_full[i + offset], data);
+                  eve::wide<T> data(&data_full[i + offset]);
+                  data = eve::fma(eve::wide<T>(options_.lr), update, data);
+                  eve::store(data, &data_full[i + offset]);
                 });
               }
 

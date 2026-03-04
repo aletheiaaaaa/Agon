@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../optimizer.h"
-#include "../../detail/simd/ops.h"
 #include "../../detail/simd/utils.h"
+#include <eve/module/core.hpp>
 
 #include <cstring>
 #include <algorithm>
@@ -63,7 +63,7 @@ namespace agon::optim {
               auto& grad_full = param.grad();
               auto& data_full = param.data();
 
-              constexpr size_t vec_size = simd::vec<T>::size;
+              constexpr size_t vec_size = eve::wide<T>::size();
               constexpr size_t unroll_factor = simd::UNROLL_FACTOR;
 
               size_t i = 0;
@@ -71,30 +71,30 @@ namespace agon::optim {
                 simd::unroll<unroll_factor>([&]<size_t index>() {
                   constexpr size_t offset = index * vec_size;
 
-                  auto grad = simd::load<T>(&grad_full[i + offset]);
-                  auto mom = simd::load<T>(&mom_full[state_offset + i + offset]);
-                  auto vel = simd::load<T>(&vel_full[state_offset + i + offset]);
+                  eve::wide<T> grad(&grad_full[i + offset]);
+                  eve::wide<T> mom(&mom_full[state_offset + i + offset]);
+                  eve::wide<T> vel(&vel_full[state_offset + i + offset]);
 
-                  if (options_.maximize) grad = simd::neg(grad);
+                  if (options_.maximize) grad = -grad;
 
-                  auto beta1 = simd::set1<T>(options_.beta1);
-                  mom = simd::fmadd(beta1, mom, grad);
-                  mom = simd::fnmadd(beta1, grad, mom);
+                  eve::wide<T> beta1(options_.beta1);
+                  mom = eve::fma(beta1, mom, grad);
+                  mom = eve::fnma(beta1, grad, mom);
 
-                  auto beta2 = simd::set1<T>(options_.beta2);
-                  auto grad_squared = (options_.use_adazo) ? simd::mul(mom, mom) : simd::mul(grad, grad);
-                  vel = simd::fmadd(beta2, vel, grad_squared);
-                  vel = simd::fnmadd(beta2, grad_squared, vel);
+                  eve::wide<T> beta2(options_.beta2);
+                  auto grad_squared = (options_.use_adazo) ? eve::mul(mom, mom) : eve::mul(grad, grad);
+                  vel = eve::fma(beta2, vel, grad_squared);
+                  vel = eve::fnma(beta2, grad_squared, vel);
 
-                  simd::store(&mom_full[state_offset + i + offset], mom);
-                  simd::store(&vel_full[state_offset + i + offset], vel);
+                  eve::store(mom, &mom_full[state_offset + i + offset]);
+                  eve::store(vel, &vel_full[state_offset + i + offset]);
 
-                  auto update = simd::div(mom, simd::add(simd::sqrt(vel), simd::set1<T>(options_.epsilon)));
-                  auto data = simd::load<T>(&data_full[i + offset]);
+                  auto update = eve::div(mom, eve::add(eve::sqrt(vel), eve::wide<T>(options_.epsilon)));
+                  eve::wide<T> data(&data_full[i + offset]);
 
-                  if (options_.lambda) update = simd::fnmadd(simd::set1<T>(options_.lambda), data, update);
-                  data = simd::fmadd(simd::set1<T>(options_.lr), update, data);
-                  simd::store(&data_full[i + offset], data);
+                  if (options_.lambda) update = eve::fnma(eve::wide<T>(options_.lambda), data, update);
+                  data = eve::fma(eve::wide<T>(options_.lr), update, data);
+                  eve::store(data, &data_full[i + offset]);
                 });
               }
 

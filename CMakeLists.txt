@@ -12,6 +12,17 @@ option(AGON_ENABLE_AVX512 "Enable AVX512 instructions (if available)" ON)
 option(AGON_ENABLE_AVX2 "Enable AVX2 instructions (if available)" ON)
 option(AGON_ENABLE_SSE4 "Enable SSE4.1 instructions (if available)" ON)
 
+include(FetchContent)
+FetchContent_Declare(
+  eve
+  GIT_REPOSITORY https://github.com/jfalcou/eve.git
+  GIT_TAG v2023.02.15
+)
+set(EVE_BUILD_TEST OFF CACHE BOOL "" FORCE)
+set(EVE_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(EVE_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+FetchContent_Populate(eve)
+
 # Header-only library target
 add_library(agon INTERFACE)
 add_library(agon::agon ALIAS agon)
@@ -23,6 +34,7 @@ target_compile_features(agon INTERFACE cxx_std_23)
 target_include_directories(agon
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${eve_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
 
