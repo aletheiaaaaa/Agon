@@ -1,7 +1,0 @@
-.vscode/
-build/
-cmake/
-.clang-format
-tests/
-.VSCodeCounter/
-.gitignore
