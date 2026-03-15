@@ -26,7 +26,7 @@
 #include "detail/dedup.hpp"
 #include "detail/unpack.hpp"
 
-namespace agon {
+namespace qgrad {
   struct Slice {
     static constexpr size_t Start = 0;
     static constexpr size_t End = std::numeric_limits<size_t>::max();
@@ -423,7 +423,7 @@ namespace agon {
         data_ = new_val;
       }
 
-      virtual void save_to_bin(const std::string& path_str, bool include_metadata = true) const {
+      virtual void save_to_bin(const std::string& path_str, bool include_metadata = true, bool include_grad = false) const {
         std::filesystem::path path(path_str);
         path.replace_extension(".bin");
 
@@ -436,6 +436,7 @@ namespace agon {
           ar(dtype, shape_);
         }
         ar(data_);
+        if (include_grad) ar(grad_);
       }
 
     protected:
@@ -583,7 +584,7 @@ namespace agon {
       float scale() const { return scale_; }
       float zero_point() const { return zero_point_; }
 
-      void save_to_bin(const std::string& path_str, bool dequantize = false, bool include_metadata = true) const {
+      void save_to_bin(const std::string& path_str, bool dequantize = false, bool include_metadata = true, bool include_grad = false) const override {
         std::filesystem::path path(path_str);
         path.replace_extension(".bin");
 
@@ -596,13 +597,9 @@ namespace agon {
           std::string dtype(this->dtype_name());
           ar(qtype, dtype, this->shape_, scale_, zero_point_);
         }
-        if (dequantize) {
-          auto data = fake_quantized();
-          ar(data);
-        } else {
-          auto data = quantized();
-          ar(data);
-        }
+        if (dequantize) ar(fake_quantized());
+        else ar(quantized());
+        if (include_grad) ar(this->grad_);
       }
 
     private:

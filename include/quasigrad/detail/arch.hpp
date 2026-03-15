@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace agon::detail {
+namespace qgrad::detail {
   enum class Arch : uint8_t {
     GENERIC,
     SSE4_1,

@@ -9,7 +9,7 @@
 
 #include "arch.hpp"
 
-namespace agon::detail {
+namespace qgrad::detail {
   template<typename T>
   struct TypeName {
     static std::string name() { return "unknown"; }

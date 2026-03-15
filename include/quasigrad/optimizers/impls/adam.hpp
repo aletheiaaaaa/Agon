@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <thread>
 
-namespace agon::optim {
+namespace qgrad::optim {
   struct AdamOptions {
     float lr = 1e-4f;
     float beta1 = 0.9f;
@@ -68,7 +68,7 @@ namespace agon::optim {
               size_t chunk_size = (param.numel() + num_proc_ - 1) / num_proc_;
 
               for (size_t t = 0; t < num_proc_; ++t) {
-                threads.emplace_back([&, t](){
+                threads.emplace_back([&, t]() {
                   size_t start = t * chunk_size;
                   size_t end = std::min(start + chunk_size, param.numel());
 
@@ -144,7 +144,7 @@ namespace agon::optim {
         cereal::BinaryInputArchive ar(in);
         std::string name;
         ar(name);
-        if (name != optimizer_type()) throw std::runtime_error("Optimizer type mismatch: expected " + std::string(optimizer_type()));
+        if (name != optimizer_type()) this->handle_type_error(name);
 
         ar(options_, state_.step, state_.momentum, state_.velocity);
 
@@ -152,6 +152,7 @@ namespace agon::optim {
           ([&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
+              ar(param_ref.get().grad());
             }
           }(param_vecs), ...);
         }, this->parameters_.data);
@@ -172,23 +173,47 @@ namespace agon::optim {
           ([&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
+              ar(param_ref.get().grad());
             }
           }(param_vecs), ...);
         }, this->parameters_.data);
+      }
+
+      std::string optimizer_type() const override {
+        std::string type = "Adam<";
+        bool first = true;
+
+        std::apply([&](auto&... param_vecs) {
+          ([&](auto& param_vec) {
+            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+
+            if (!first) type += ", ";
+            first = false;
+            type += PrintType<ParamType>::name() + "[";
+
+            bool pfirst = true;
+            for (auto& param_ref : param_vec) {
+              if (!pfirst) type += ",";
+              pfirst = false;
+
+              auto& shape = param_ref.get().size();
+              for (size_t i = 0; i < shape.size(); ++i) {
+                if (i > 0) type += "x";
+                type += std::to_string(shape[i]);
+              }
+            }
+
+            type += "]";
+          }(param_vecs), ...);
+        }, this->parameters_.data);
+
+        type += ">";
+        return type;
       }
 
     private:
       AdamOptions options_;
       AdamState<DedupedTuple> state_;
       int num_proc_;
-
-      std::string optimizer_type() const {
-        return "Adam<" + []<typename... Us>(std::tuple<Us...>*) {
-          std::string result;
-          bool last = true;
-          ((result += (last ? "" : ", ") + PrintType<std::remove_cvref_t<Us>>::name(), last = false), ...);
-          return result;
-        }(static_cast<DedupedTuple*>(nullptr)) + ">";
-      }
   };
 }

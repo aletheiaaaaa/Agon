@@ -6,7 +6,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace agon::detail {
+namespace qgrad::detail {
   template<typename T>
   struct is_span : std::false_type {};
 

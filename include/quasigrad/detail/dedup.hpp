@@ -2,7 +2,7 @@
 
 #include <tuple>
 
-namespace agon::detail {
+namespace qgrad::detail {
   template <typename T, typename... Ts>
   concept ContainedInPack = (std::same_as<T, Ts> || ...);
 
