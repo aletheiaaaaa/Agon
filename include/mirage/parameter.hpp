@@ -108,10 +108,13 @@ namespace mirage {
 
   template<typename T>
     requires std::is_floating_point_v<T>
-  struct View {
+  class View {
     public: 
       using is_param_like = std::true_type;
       using DataType = T;
+
+      View(Parameter<std::remove_const_t<T>>& ref, size_t offset, std::vector<size_t> shape, std::vector<size_t> strides) 
+        : ref_(ref), offset_(offset), shape_(std::move(shape)), strides_(std::move(strides)) {}
 
       template<typename... Args>
         requires (std::convertible_to<Args, Range> && ...)
@@ -123,12 +126,7 @@ namespace mirage {
         }
 
         auto params = detail::compute_view(slices, shape_, strides_);
-        return View<T>{
-          .ref = ref_,
-          .offset = offset_ + params.offset,
-          .shape = std::move(params.shape),
-          .strides = std::move(params.strides),
-        };
+        return View<T>(ref_.get(), offset_ + params.offset, std::move(params.shape), std::move(params.strides));
       }
 
       template<typename... Args>
@@ -141,12 +139,7 @@ namespace mirage {
         }
 
         auto params = detail::compute_view(slices, shape_, strides_);
-        return View<const T>{
-          .ref = std::cref(ref_.get()),
-          .offset = offset_ + params.offset,
-          .shape = std::move(params.shape),
-          .strides = std::move(params.strides),
-        };
+        return View<const T>(ref_.get(), offset_ + params.offset, std::move(params.shape), std::move(params.strides));
       }
 
       std::vector<T> materialize() {
@@ -234,8 +227,13 @@ namespace mirage {
       std::vector<T>& data() { return ref_.get().data(); }
       const std::vector<T>& data() const { return ref_.get().data(); }
 
-      size_t rank() const { return shape_.size(); }
+      const std::vector<size_t>& size() const { return shape_; }
+      size_t size(size_t i) const { return shape_[i]; }
 
+      const std::vector<size_t>& strides() const { return strides_; }
+      size_t strides(size_t i) const {return strides_[i]; };
+
+      size_t rank() const { return shape_.size(); }
       size_t numel() const {
         return std::accumulate(shape_.begin(), shape_.end(), size_t{1}, std::multiplies<size_t>{});
       }
@@ -357,12 +355,7 @@ namespace mirage {
         }
 
         auto params = detail::compute_view(slices, shape_, strides_);
-        return View<T>{
-          .ref = *this,
-          .offset = params.offset,
-          .shape = std::move(params.shape),
-          .strides = std::move(params.strides),
-        };
+        return View<T>(*this, params.offset, std::move(params.shape), std::move(params.strides));
       }
 
       template<typename... Args>
@@ -375,12 +368,7 @@ namespace mirage {
         }
 
         auto params = detail::compute_view(slices, shape_, strides_);
-        return View<const T>{
-          .ref = *this,
-          .offset = params.offset,
-          .shape = std::move(params.shape),
-          .strides = std::move(params.strides),
-        };
+        return View<const T>(const_cast<Parameter<T>&>(*this), params.offset, std::move(params.shape), std::move(params.strides));
       }
 
       template<typename S>
@@ -423,7 +411,7 @@ namespace mirage {
         data_ = new_val;
       }
 
-      virtual void save_to_bin(const std::string& path_str, bool include_metadata = true, bool include_grad = false) const {
+      void save_to_bin(const std::string& path_str, bool include_metadata = true, bool include_grad = false) const {
         std::filesystem::path path(path_str);
         path.replace_extension(".bin");
 
@@ -584,7 +572,7 @@ namespace mirage {
       float scale() const { return scale_; }
       float zero_point() const { return zero_point_; }
 
-      void save_to_bin(const std::string& path_str, bool dequantize = false, bool include_metadata = true, bool include_grad = false) const override {
+      void save_to_bin(const std::string& path_str, bool dequantize = false, bool include_metadata = true, bool include_grad = false) const {
         std::filesystem::path path(path_str);
         path.replace_extension(".bin");
 

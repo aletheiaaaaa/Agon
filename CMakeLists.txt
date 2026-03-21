@@ -171,8 +171,18 @@ install(EXPORT mirageTargets
 # Package configuration
 include(CMakePackageConfigHelpers)
 
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/mirageConfig.cmake.in
+[=[
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/mirageTargets.cmake")
+
+check_required_components(mirage)
+]=]
+)
+
 configure_package_config_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/mirageConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/mirageConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/mirageConfig.cmake
   INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mirage
 )
@@ -197,29 +207,29 @@ export(EXPORT mirageTargets
 
 # Uninstall target
 if(NOT TARGET uninstall)
-  file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake" CONTENT
-[[if(NOT EXISTS "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
-  message(FATAL_ERROR "Cannot find install manifest: @CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+"if(NOT EXISTS \"${CMAKE_CURRENT_BINARY_DIR}/install_manifest.txt\")
+  message(FATAL_ERROR \"Cannot find install manifest: ${CMAKE_CURRENT_BINARY_DIR}/install_manifest.txt\")
 endif()
 
-file(READ "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt" files)
-string(REGEX REPLACE "\n" ";" files "${files}")
+file(READ \"${CMAKE_CURRENT_BINARY_DIR}/install_manifest.txt\" files)
+string(REGEX REPLACE \"\\n\" \";\" files \"\${files}\")
 
-foreach(file ${files})
-  message(STATUS "Uninstalling $ENV{DESTDIR}${file}")
-  if(IS_SYMLINK "$ENV{DESTDIR}${file}" OR EXISTS "$ENV{DESTDIR}${file}")
+foreach(file \${files})
+  message(STATUS \"Uninstalling \$ENV{DESTDIR}\${file}\")
+  if(IS_SYMLINK \"\$ENV{DESTDIR}\${file}\" OR EXISTS \"\$ENV{DESTDIR}\${file}\")
     execute_process(
-      COMMAND "@CMAKE_COMMAND@" -E remove "$ENV{DESTDIR}${file}"
+      COMMAND \"${CMAKE_COMMAND}\" -E remove \"\$ENV{DESTDIR}\${file}\"
       RESULT_VARIABLE rm_retval
     )
-    if(NOT "${rm_retval}" STREQUAL "0")
-      message(FATAL_ERROR "Problem when removing $ENV{DESTDIR}${file}")
+    if(NOT \"\${rm_retval}\" STREQUAL \"0\")
+      message(FATAL_ERROR \"Problem when removing \$ENV{DESTDIR}\${file}\")
     endif()
   else()
-    message(STATUS "File $ENV{DESTDIR}${file} does not exist.")
+    message(STATUS \"File \$ENV{DESTDIR}\${file} does not exist.\")
   endif()
 endforeach()
-]] @ONLY)
+")
   add_custom_target(uninstall
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
   )
