@@ -113,7 +113,7 @@ namespace mirage {
       using is_param_like = std::true_type;
       using DataType = T;
 
-      View(Parameter<std::remove_const_t<T>>& ref, size_t offset, std::vector<size_t> shape, std::vector<size_t> strides) 
+      View(Parameter<T>& ref, size_t offset, std::vector<size_t> shape, std::vector<size_t> strides) 
         : ref_(ref), offset_(offset), shape_(std::move(shape)), strides_(std::move(strides)) {}
 
       template<typename... Args>
