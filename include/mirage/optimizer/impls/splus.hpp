@@ -1,90 +1,113 @@
 #pragma once
 
-#include "../optimizer.hpp"
-#include "../../detail/matrix.hpp"
-#include "../../detail/utils.hpp"
-
+#include <Eigen/Core>
+#include <Eigen/Eigenvalues>
+#include <algorithm>
 #include <cstddef>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
+
+#include "../../detail/matrix.hpp"
+#include "../../detail/utils.hpp"
+#include "../optimizer.hpp"
 
 namespace mirage::optim {
-  struct SPlusOptions {
-    float lr = 0.5f;
-    float beta1 = 0.9f;
-    float beta2 = 0.4f;
-    float beta3 = 0.999f;
-    float lambda = 0.0f;
-    int decompose_every = 64;
+struct SPlusOptions {
+  float lr = 0.5f;
+  float beta1 = 0.9f;
+  float beta2 = 0.4f;
+  float beta3 = 0.999f;
+  float lambda = 0.0f;
+  int decompose_every = 64;
 
-    int num_proc = 1;
+  int num_proc = 1;
 
-    bool maximize = false;
+  bool maximize = false;
 
-    template<class Archive>
-    void serialize(Archive& ar) {
-      ar(lr, beta1, beta2, beta3, lambda, decompose_every, maximize);
-    }
-  };
+  template <class Archive>
+  void serialize(Archive& ar) {
+    ar(lr, beta1, beta2, beta3, lambda, decompose_every, maximize);
+  }
+};
 
-  template<typename DedupedTuple>
-  struct SPlusState : public OptimizerState {
-    detail::ExtractedVector<DedupedTuple> momentum{};
-    detail::ExtractedVector<DedupedTuple> left_velocity{};
-    detail::ExtractedVector<DedupedTuple> right_velocity{};
-    detail::ExtractedVector<DedupedTuple> left_eigenvectors{};
-    detail::ExtractedVector<DedupedTuple> right_eigenvectors{};
-    detail::ExtractedVector<DedupedTuple> param_ema{};
-  };
+template <typename DedupedTuple>
+struct SPlusState : public OptimizerState {
+  detail::ExtractedVector<DedupedTuple> momentum{};
+  detail::ExtractedVector<DedupedTuple> left_velocity{};
+  detail::ExtractedVector<DedupedTuple> right_velocity{};
+  detail::ExtractedVector<DedupedTuple> left_eigenvectors{};
+  detail::ExtractedVector<DedupedTuple> right_eigenvectors{};
+  detail::ExtractedVector<DedupedTuple> param_ema{};
+};
 
-  template<typename DedupedPack>
-    requires detail::NonConstPack<DedupedPack>
-  class SPlus : public Optimizer<DedupedPack> {
-    public:
-      explicit SPlus(ParameterPack<DedupedPack> parameters, SPlusOptions options = {})
-        : Optimizer<DedupedPack>(parameters), options_(options) {
-          assert(std::apply([](auto&... param_vecs) {
-            return (std::all_of(param_vecs.begin(), param_vecs.end(),
-              [](auto& p) { return p.get().rank() >= 2; }) && ...
-            );
-          }, this->parameters_.data) && "All parameters must have at least 2 dimensions");
+template <typename DedupedPack>
+  requires detail::NonConstPack<DedupedPack>
+class SPlus : public Optimizer<DedupedPack> {
+ public:
+  explicit SPlus(ParameterPack<DedupedPack> parameters, SPlusOptions options = {})
+      : Optimizer<DedupedPack>(parameters), options_(options) {
+    assert(
+      std::apply(
+        [](auto&... param_vecs) {
+          return (
+            std::all_of(
+              param_vecs.begin(), param_vecs.end(), [](auto& p) { return p.get().rank() >= 2; }
+            ) &&
+            ...
+          );
+        },
+        this->parameters_.data
+      ) &&
+      "All parameters must have at least 2 dimensions"
+    );
 
-          std::apply([&](auto&... param_vecs) {
-            ([&](auto& param_vec) {
-              using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-              auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
-              auto& lvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_velocity);
-              auto& rvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.right_velocity);
-              auto& leig = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_eigenvectors);
-              auto& reig = std::get<detail::ExtractType_t<ParamType>>(this->state_.right_eigenvectors);
-              auto& ema = std::get<detail::ExtractType_t<ParamType>>(this->state_.param_ema);
-              for (auto& param_ref : param_vec) {
-                auto& param = param_ref.get();
-                size_t l_numel = param.size(0) * param.size(0);
-                size_t r_numel = param.strides(0) * param.strides(0);
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
+            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+            auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
+            auto& lvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_velocity);
+            auto& rvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.right_velocity);
+            auto& leig = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_eigenvectors);
+            auto& reig =
+              std::get<detail::ExtractType_t<ParamType>>(this->state_.right_eigenvectors);
+            auto& ema = std::get<detail::ExtractType_t<ParamType>>(this->state_.param_ema);
+            for (auto& param_ref : param_vec) {
+              auto& param = param_ref.get();
+              size_t l_numel = param.size(0) * param.size(0);
+              size_t r_numel = param.strides(0) * param.strides(0);
 
-                using T = typename ParamType::DataType;
-                mom.insert(mom.end(), param.numel(), T(0));
-                lvel.insert(lvel.end(), l_numel, T(0));
-                rvel.insert(rvel.end(), r_numel, T(0));
-                leig.insert(leig.end(), l_numel, T(0));
-                reig.insert(reig.end(), r_numel, T(0));
-                ema.insert(ema.end(), param.numel(), T(0));
-              }
-            }(param_vecs), ...);
-          }, this->parameters_.data);
-        }
+              using T = typename ParamType::DataType;
+              mom.insert(mom.end(), param.numel(), T(0));
+              lvel.insert(lvel.end(), l_numel, T(0));
+              rvel.insert(rvel.end(), r_numel, T(0));
+              leig.insert(leig.end(), l_numel, T(0));
+              reig.insert(reig.end(), r_numel, T(0));
+              ema.insert(ema.end(), param.numel(), T(0));
+            }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void step() override {
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+  void step() override {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
             auto& mom_full = std::get<detail::ExtractType_t<ParamType>>(state_.momentum);
             auto& lvel_full = std::get<detail::ExtractType_t<ParamType>>(state_.left_velocity);
             auto& rvel_full = std::get<detail::ExtractType_t<ParamType>>(state_.right_velocity);
+            auto& leig_full = std::get<detail::ExtractType_t<ParamType>>(state_.left_eigenvectors);
+            auto& reig_full = std::get<detail::ExtractType_t<ParamType>>(state_.right_eigenvectors);
             auto& ema_full = std::get<detail::ExtractType_t<ParamType>>(state_.param_ema);
 
             size_t state_offset = 0;
@@ -99,10 +122,14 @@ namespace mirage::optim {
               param_tp.transpose(0, 1);
               param_tp.view(param_og.size());
 
-              auto& mom_slice = std::span(mom_full).subspan(state_offset, param_og.numel() - 1);
-              auto& rvel_slice = std::span(rvel_full).subspan(state_offset, param_og.numel() - 1);
-              auto& lvel_slice = std::span(lvel_full).subspan(state_offset, param_og.numel() - 1);
-              auto& ema_slice = std::span(ema_full).subspan(state_offset, param_og.numel() - 1);
+              size_t numel_off = param_og.numel() - 1;
+
+              auto& mom_slice = std::span(mom_full).subspan(state_offset, numel_off);
+              auto& rvel_slice = std::span(rvel_full).subspan(state_offset, numel_off);
+              auto& lvel_slice = std::span(lvel_full).subspan(state_offset, numel_off);
+              auto& reig_slice = std::span(reig_full).subspan(state_offset, numel_off);
+              auto& leig_slice = std::span(leig_full).subspan(state_offset, numel_off);
+              auto& ema_slice = std::span(ema_full).subspan(state_offset, numel_off);
 
               auto& og_grad_full = param_og.grad();
               auto& tp_grad_full = param_tp.grad();
@@ -113,9 +140,14 @@ namespace mirage::optim {
 
               auto compute_chunks = [&](size_t chunk_width, size_t chunk_height) {
                 if (options_.num_proc % 2) {
-                  return std::make_pair((chunk_width + options_.num_proc - 1) / options_.num_proc, chunk_height);
-                } 
-                return std::make_pair((2 * chunk_width + options_.num_proc - 1) / options_.num_proc, (chunk_height + 1) / 2);
+                  return std::make_pair(
+                    (chunk_width + options_.num_proc - 1) / options_.num_proc, chunk_height
+                  );
+                }
+                return std::make_pair(
+                  (2 * chunk_width + options_.num_proc - 1) / options_.num_proc,
+                  (chunk_height + 1) / 2
+                );
               };
 
               const auto [wh_width, wh_height] = compute_chunks(width, height);
@@ -124,109 +156,230 @@ namespace mirage::optim {
 
               std::vector<std::thread> threads;
               for (size_t t = 0; t < options_.num_proc; ++t) {
+                const auto offsets = [&](size_t chunk_width, size_t chunk_height) {
+                  if (options_.num_proc % 2) {
+                    return std::make_pair(t * chunk_width, 0);
+                  }
+                  return std::make_pair((t / 2) * chunk_width, (t % 2) * chunk_height);
+                };
+
+                const auto [wh_x_off, wh_y_off] = offsets(wh_width, wh_height);
+                const auto [ww_x_off, ww_y_off] = offsets(ww_width, ww_height);
+                const auto [hh_x_off, hh_y_off] = offsets(hh_width, hh_height);
+
                 threads.emplace_back([&, t]() {
-                  const auto offsets = [&](size_t chunk_width, size_t chunk_height) {
-                    if (options_.num_proc % 2) {
-                      return std::make_pair(t * chunk_width, 0);
-                    }
-                    return std::make_pair((t / 2) * chunk_width, (t % 2) * chunk_height);
-                  };
-
-                  const auto [wh_x_off, wh_y_off] = offsets(wh_width, wh_height);
-                  const auto [ww_x_off, ww_y_off] = offsets(ww_width, ww_height);
-                  const auto [hh_x_off, hh_y_off] = offsets(hh_width, hh_height);
-
                   detail::symmetrized_ema_tile(
-                    og_grad_full, 
-                    tp_grad_full, 
+                    og_grad_full,
+                    tp_grad_full,
                     lvel_slice,
-                    width, 
-                    height, 
-                    std::min(ww_width, width - ww_x_off), 
-                    std::min(ww_height, height - ww_y_off), 
-                    ww_x_off, 
-                    ww_y_off, 
+                    width,
+                    height,
+                    std::min(ww_width, width - ww_x_off),
+                    std::min(ww_height, height - ww_y_off),
+                    ww_x_off,
+                    ww_y_off,
                     options_.beta2
                   );
 
                   detail::symmetrized_ema_tile(
-                    tp_grad_full, 
-                    og_grad_full, 
+                    tp_grad_full,
+                    og_grad_full,
                     rvel_slice,
-                    height, 
-                    width, 
-                    std::min(hh_width, width - hh_x_off), 
-                    std::min(hh_height, height - hh_y_off), 
-                    hh_x_off, 
-                    hh_y_off, 
+                    height,
+                    width,
+                    std::min(hh_width, width - hh_x_off),
+                    std::min(hh_height, height - hh_y_off),
+                    hh_x_off,
+                    hh_y_off,
                     options_.beta2
                   );
 
-                  // TODO: the rest of the optimizer step
+                  detail::ema_tile(
+                    og_grad_full,
+                    mom_slice,
+                    width,
+                    height,
+                    std::min(wh_width, width - wh_x_off),
+                    std::min(wh_height, height - wh_y_off),
+                    wh_x_off,
+                    wh_y_off,
+                    options_.beta1
+                  );
                 });
               }
 
               for (auto& thread : threads) {
                 thread.join();
               }
+
+              using Matrix = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+
+              Eigen::Map<Matrix> lvel_format(lvel_full, width, width);
+              Eigen::Map<Matrix> rvel_format(rvel_full, height, height);
+
+              Eigen::EigenSolver<Matrix> lvel_solver(lvel_format);
+              Eigen::EigenSolver<Matrix> rvel_solver(rvel_format);
+
+              auto leig_new = lvel_solver.eigenvectors().real();
+              auto reig_new = rvel_solver.eigenvectors().real();
+
+              Eigen::Map<Matrix>(leig_slice, width, width) = leig_new;
+              Eigen::Map<Matrix>(reig_slice, height, height) = reig_new;
+
+              threads.clear();
+              std::vector<T> temp;
+              temp.reserve(param_og.numel());
+              for (size_t t = 0; t < options_.num_proc; ++t) {
+                const auto [x_off, y_off] = [&]() {
+                  if (options_.num_proc % 2) {
+                    return std::make_pair(t * wh_width, 0);
+                  }
+                  return std::make_pair((t / 2) * wh_width, (t % 2) * wh_height);
+                }();
+
+                threads.emplace_back([&, t]() {
+                  detail::triple_matmul_sign(
+                    detail::transpose(std::vector(leig_slice.begin(), leig_slice.end())),
+                    mom_slice,
+                    std::vector(reig_slice.begin(), reig_slice.end()),
+                    temp,
+                    width,
+                    width,
+                    height,
+                    height,
+                    wh_width,
+                    wh_height,
+                    x_off,
+                    y_off
+                  );
+                });
+              }
+
+              for (auto& thread : threads) {
+                thread.join();
+              }
+
+              threads.clear();
+              std::vector<T> update;
+              for (size_t t = 0; t < options_.num_proc; ++t) {
+                const auto [x_off, y_off] = [&]() {
+                  if (options_.num_proc % 2) {
+                    return std::make_pair(t * wh_width, 0);
+                  }
+                  return std::make_pair((t / 2) * wh_width, (t % 2) * wh_height);
+                }();
+
+                threads.emplace_back([&, t]() {
+                  detail::triple_matmul_tile(
+                    std::vector(leig_slice.begin(), leig_slice.end()),
+                    mom_slice,
+                    detail::transpose(std::vector(reig_slice.begin(), reig_slice.end())),
+                    update,
+                    width,
+                    width,
+                    height,
+                    height,
+                    wh_width,
+                    wh_height,
+                    x_off,
+                    y_off
+                  );
+                });
+
+                // TODO actual gradient update, dependent on updating detail/matrix
+              }
+
+              for (auto& thread : threads) {
+                thread.join();
+              }
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-        this->state_.step++;
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+    this->state_.step++;
+  }
 
-      void load_from_bin(const std::string& path_str) override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void load_from_bin(const std::string& path_str) override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
+    if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryInputArchive ar(in);
-        std::string name;
-        ar(name);
-        if (name != optimizer_type()) this->handle_type_error(name);
+    cereal::BinaryInputArchive ar(in);
+    std::string name;
+    ar(name);
+    if (name != optimizer_type()) this->handle_type_error(name);
 
-        ar(options_, state_.step, state_.momentum, state_.left_velocity, state_.right_velocity, state_.param_ema);
+    ar(
+      options_,
+      state_.step,
+      state_.momentum,
+      state_.left_velocity,
+      state_.right_velocity,
+      state_.param_ema
+    );
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void save_to_bin(const std::string& path_str) const override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void save_to_bin(const std::string& path_str) const override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        std::ofstream out(path, std::ios::binary);
-        if (!out) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryOutputArchive ar(out);
-        std::string name(optimizer_type());
+    cereal::BinaryOutputArchive ar(out);
+    std::string name(optimizer_type());
 
-        ar(name, options_, state_.step, state_.momentum, state_.left_velocity, state_.right_velocity, state_.param_ema);
+    ar(
+      name,
+      options_,
+      state_.step,
+      state_.momentum,
+      state_.left_velocity,
+      state_.right_velocity,
+      state_.param_ema
+    );
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      std::string optimizer_type() const override {
-        std::string type = "SPlus<";
-        bool first = true;
+  std::string optimizer_type() const override {
+    std::string type = "SPlus<";
+    bool first = true;
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
 
             if (!first) type += ", ";
@@ -246,15 +399,18 @@ namespace mirage::optim {
             }
 
             type += "]";
-          }(param_vecs), ...);
-        }, this->parameters_.data);
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
 
-        type += ">";
-        return type;
-      }
+    type += ">";
+    return type;
+  }
 
-    private:
-      SPlusOptions options_;
-      SPlusState<DedupedPack> state_;
-  };
-}
+ private:
+  SPlusOptions options_;
+  SPlusState<DedupedPack> state_;
+};
+}  // namespace mirage::optim

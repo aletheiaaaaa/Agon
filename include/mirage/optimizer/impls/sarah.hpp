@@ -1,63 +1,76 @@
 #pragma once
 
-#include "../optimizer.hpp"
-#include "../../detail/utils.hpp"
-
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 
+#include "../../detail/utils.hpp"
+#include "../optimizer.hpp"
+
 namespace mirage::optim {
-  struct SarahOptions {
-    float lr = 0.01f;
-    float lambda = 0.0f;
-    int recompute_every = 64;
+struct SarahOptions {
+  float lr = 0.01f;
+  float lambda = 0.0f;
+  int recompute_every = 64;
 
-    bool maximize = false;
+  bool maximize = false;
 
-    int num_proc = 1;
+  int num_proc = 1;
 
-    template<class Archive>
-    void serialize(Archive& ar) {
-      ar(lr, lambda, recompute_every, maximize);
-    }
-  };
+  template <class Archive>
+  void serialize(Archive& ar) {
+    ar(lr, lambda, recompute_every, maximize);
+  }
+};
 
-  template<typename DedupedTuple>
-  struct SarahState : public OptimizerState {
-    detail::ExtractedVector<DedupedTuple> prev_grad{};
-    detail::ExtractedVector<DedupedTuple> prev_update{};
-  };
+template <typename DedupedTuple>
+struct SarahState : public OptimizerState {
+  detail::ExtractedVector<DedupedTuple> prev_grad{};
+  detail::ExtractedVector<DedupedTuple> prev_update{};
+};
 
-  template<typename DedupedPack>
-    requires detail::NonConstPack<DedupedPack>
-  class Sarah : public Optimizer<DedupedPack> {
-    public:
-      explicit Sarah(ParameterPack<DedupedPack> parameters, SarahOptions options = {})
-        : Optimizer<DedupedPack>(parameters), options_(options) {
-          if ((options_.recompute_every != -1) && options_.recompute_every == 0) throw std::invalid_argument("Recompute every must be greater than 0 when recompute is enabled");
+template <typename DedupedPack>
+  requires detail::NonConstPack<DedupedPack>
+class Sarah : public Optimizer<DedupedPack> {
+ public:
+  explicit Sarah(ParameterPack<DedupedPack> parameters, SarahOptions options = {})
+      : Optimizer<DedupedPack>(parameters), options_(options) {
+    if ((options_.recompute_every != -1) && options_.recompute_every == 0)
+      throw std::invalid_argument(
+        "Recompute every must be greater than 0 when recompute is enabled"
+      );
 
-          std::apply([&](auto&... param_vecs) {
-            ([&](auto& param_vec) {
-              using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-              auto& prev_grad = std::get<detail::ExtractType_t<ParamType>>(this->state_.prev_grad);
-              auto& prev_update = std::get<detail::ExtractType_t<ParamType>>(this->state_.prev_update);
-              for (auto& param_ref : param_vec) {
-                auto& param = param_ref.get();
-                using T = typename ParamType::DataType;
-                prev_grad.insert(prev_grad.end(), param.numel(), T(0));
-                prev_update.insert(prev_update.end(), param.numel(), T(0));
-              }
-            }(param_vecs), ...);
-          }, this->parameters_.data);
-        }
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
+            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+            auto& prev_grad = std::get<detail::ExtractType_t<ParamType>>(this->state_.prev_grad);
+            auto& prev_update =
+              std::get<detail::ExtractType_t<ParamType>>(this->state_.prev_update);
+            for (auto& param_ref : param_vec) {
+              auto& param = param_ref.get();
+              using T = typename ParamType::DataType;
+              prev_grad.insert(prev_grad.end(), param.numel(), T(0));
+              prev_update.insert(prev_update.end(), param.numel(), T(0));
+            }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      bool recompute() const override { return (options_.recompute_every != -1) && state_.step % options_.recompute_every == 0; }
+  bool recompute() const override {
+    return (options_.recompute_every != -1) && state_.step % options_.recompute_every == 0;
+  }
 
-      void step() override {
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+  void step() override {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
             auto& prev_grad_full = std::get<detail::ExtractType_t<ParamType>>(state_.prev_grad);
             auto& prev_update_full = std::get<detail::ExtractType_t<ParamType>>(state_.prev_update);
@@ -91,13 +104,18 @@ namespace mirage::optim {
                       if (options_.maximize) grad = -grad;
 
                       auto update = [&]() {
-                        if ((options_.recompute_every != -1) && state_.step % options_.recompute_every == 0) return grad;
+                        if (
+                          (options_.recompute_every != -1) &&
+                          state_.step % options_.recompute_every == 0
+                        )
+                          return grad;
 
                         eve::wide<T> prev_grad(&prev_grad_full[state_offset + i + offset]);
                         eve::wide<T> prev_update(&prev_update_full[state_offset + i + offset]);
 
                         grad = eve::add(eve::sub(grad, prev_grad), prev_update);
-                        if (options_.lambda) grad = eve::fnma(eve::wide<T>(options_.lambda), data, grad);
+                        if (options_.lambda)
+                          grad = eve::fnma(eve::wide<T>(options_.lambda), data, grad);
 
                         return grad;
                       }();
@@ -111,8 +129,11 @@ namespace mirage::optim {
 
                   for (; i < end; ++i) {
                     T grad = options_.maximize ? -grad_full[i] : grad_full[i];
-                    T update = ((options_.recompute_every != -1) && state_.step % options_.recompute_every == 0)
-                      ? grad : grad - prev_grad_full[state_offset + i] + prev_update_full[state_offset + i];
+                    T update = ((options_.recompute_every != -1) &&
+                                state_.step % options_.recompute_every == 0)
+                                 ? grad
+                                 : grad - prev_grad_full[state_offset + i] +
+                                     prev_update_full[state_offset + i];
 
                     if (options_.lambda) update = update - options_.lambda * data_full[i];
 
@@ -129,64 +150,79 @@ namespace mirage::optim {
 
               state_offset += param.numel();
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-        this->state_.step++;
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+    this->state_.step++;
+  }
 
-      void load_from_bin(const std::string& path_str) override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void load_from_bin(const std::string& path_str) override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
+    if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryInputArchive ar(in);
-        std::string name;
-        ar(name);
-        if (name != optimizer_type()) this->handle_type_error(name);
+    cereal::BinaryInputArchive ar(in);
+    std::string name;
+    ar(name);
+    if (name != optimizer_type()) this->handle_type_error(name);
 
-        ar(options_, state_.step, state_.prev_grad, state_.prev_update);
+    ar(options_, state_.step, state_.prev_grad, state_.prev_update);
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void save_to_bin(const std::string& path_str) const override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void save_to_bin(const std::string& path_str) const override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        std::ofstream out(path, std::ios::binary);
-        if (!out) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryOutputArchive ar(out);
-        std::string name(optimizer_type());
-        ar(name, options_, state_.step, state_.prev_grad, state_.prev_update);
+    cereal::BinaryOutputArchive ar(out);
+    std::string name(optimizer_type());
+    ar(name, options_, state_.step, state_.prev_grad, state_.prev_update);
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      std::string optimizer_type() const override {
-        std::string type = "SARAH<";
-        bool first = true;
+  std::string optimizer_type() const override {
+    std::string type = "SARAH<";
+    bool first = true;
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
 
             if (!first) type += ", ";
@@ -206,15 +242,18 @@ namespace mirage::optim {
             }
 
             type += "]";
-          }(param_vecs), ...);
-        }, this->parameters_.data);
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
 
-        type += ">";
-        return type;
-      }
+    type += ">";
+    return type;
+  }
 
-    private:
-      SarahOptions options_;
-      SarahState<DedupedPack> state_;
-  };
-}
+ private:
+  SarahOptions options_;
+  SarahState<DedupedPack> state_;
+};
+}  // namespace mirage::optim

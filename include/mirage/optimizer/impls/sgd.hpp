@@ -1,57 +1,64 @@
 #pragma once
 
-#include "../optimizer.hpp"
-#include "../../detail/utils.hpp"
-
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 
+#include "../../detail/utils.hpp"
+#include "../optimizer.hpp"
+
 namespace mirage::optim {
-  struct SGDOptions {
-    float lr = 0.01f;
-    float momentum = 0.0f;
-    float lambda = 0.0f;
+struct SGDOptions {
+  float lr = 0.01f;
+  float momentum = 0.0f;
+  float lambda = 0.0f;
 
-    bool nesterov = false;
-    bool maximize = false;
+  bool nesterov = false;
+  bool maximize = false;
 
-    int num_proc = 1;
+  int num_proc = 1;
 
-    template<class Archive>
-    void serialize(Archive& ar) {
-      ar(lr, momentum, lambda, nesterov, maximize);
-    }
-  };
+  template <class Archive>
+  void serialize(Archive& ar) {
+    ar(lr, momentum, lambda, nesterov, maximize);
+  }
+};
 
-  template<typename DedupedTuple>
-  struct SGDState : public OptimizerState {
-    detail::ExtractedVector<DedupedTuple> momentum{};
-  };
+template <typename DedupedTuple>
+struct SGDState : public OptimizerState {
+  detail::ExtractedVector<DedupedTuple> momentum{};
+};
 
-  template<typename DedupedPack>
-    requires detail::NonConstPack<DedupedPack>
-  class SGD : public Optimizer<DedupedPack> {
-    public:
-      explicit SGD(ParameterPack<DedupedPack> parameters, SGDOptions options = {})
-        : Optimizer<DedupedPack>(parameters), options_(options) {
-          std::apply([&](auto&... param_vecs) {
-            ([&](auto& param_vec) {
-              using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-              auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
-              for (auto& param_ref : param_vec) {
-                auto& param = param_ref.get();
-                using T = typename ParamType::DataType;
-                mom.insert(mom.end(), param.numel(), T(0));
-              }
-            }(param_vecs), ...);
-          }, this->parameters_.data);
-        }
+template <typename DedupedPack>
+  requires detail::NonConstPack<DedupedPack>
+class SGD : public Optimizer<DedupedPack> {
+ public:
+  explicit SGD(ParameterPack<DedupedPack> parameters, SGDOptions options = {})
+      : Optimizer<DedupedPack>(parameters), options_(options) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
+            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+            auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
+            for (auto& param_ref : param_vec) {
+              auto& param = param_ref.get();
+              using T = typename ParamType::DataType;
+              mom.insert(mom.end(), param.numel(), T(0));
+            }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void step() override {
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+  void step() override {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
             auto& mom_full = std::get<detail::ExtractType_t<ParamType>>(state_.momentum);
 
@@ -90,9 +97,11 @@ namespace mirage::optim {
                           mom = eve::fma(eve::wide<T>(options_.momentum), mom, grad);
                           eve::store(mom, &mom_full[state_offset + i + offset]);
 
-                          if (options_.nesterov) grad = eve::fma(eve::wide<T>(options_.momentum), mom, grad);
+                          if (options_.nesterov)
+                            grad = eve::fma(eve::wide<T>(options_.momentum), mom, grad);
                         }
-                        if (options_.lambda) grad = eve::fma(eve::wide<T>(options_.lambda), data, grad);
+                        if (options_.lambda)
+                          grad = eve::fma(eve::wide<T>(options_.lambda), data, grad);
 
                         return grad;
                       }();
@@ -121,65 +130,80 @@ namespace mirage::optim {
 
               state_offset += param.numel();
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-        this->state_.step++;
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+    this->state_.step++;
+  }
 
-      void load_from_bin(const std::string& path_str) override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void load_from_bin(const std::string& path_str) override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
+    if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryInputArchive ar(in);
-        std::string name;
-        ar(name);
-        if (name != optimizer_type()) this->handle_type_error(name);
+    cereal::BinaryInputArchive ar(in);
+    std::string name;
+    ar(name);
+    if (name != optimizer_type()) this->handle_type_error(name);
 
-        ar(options_, state_.step, state_.momentum);
+    ar(options_, state_.step, state_.momentum);
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void save_to_bin(const std::string& path_str) const override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void save_to_bin(const std::string& path_str) const override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        std::ofstream out(path, std::ios::binary);
-        if (!out) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryOutputArchive ar(out);
-        std::string name(optimizer_type());
+    cereal::BinaryOutputArchive ar(out);
+    std::string name(optimizer_type());
 
-        ar(name, options_, state_.step, state_.momentum);
+    ar(name, options_, state_.step, state_.momentum);
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      std::string optimizer_type() const override {
-        std::string type = "SGD<";
-        bool first = true;
+  std::string optimizer_type() const override {
+    std::string type = "SGD<";
+    bool first = true;
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
 
             if (!first) type += ", ";
@@ -199,15 +223,18 @@ namespace mirage::optim {
             }
 
             type += "]";
-          }(param_vecs), ...);
-        }, this->parameters_.data);
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
 
-        type += ">";
-        return type;
-      }
+    type += ">";
+    return type;
+  }
 
-    private:
-      SGDOptions options_;
-      SGDState<DedupedPack> state_;
-  };
-}
+ private:
+  SGDOptions options_;
+  SGDState<DedupedPack> state_;
+};
+}  // namespace mirage::optim

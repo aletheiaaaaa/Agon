@@ -1,62 +1,69 @@
 #pragma once
 
-#include "../optimizer.hpp"
-#include "../../detail/utils.hpp"
-
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 
+#include "../../detail/utils.hpp"
+#include "../optimizer.hpp"
+
 namespace mirage::optim {
-  struct AdamOptions {
-    float lr = 1e-4f;
-    float beta1 = 0.9f;
-    float beta2 = 0.4f;
-    float epsilon = 1e-8f;
-    float lambda = 0.0f;
+struct AdamOptions {
+  float lr = 1e-4f;
+  float beta1 = 0.9f;
+  float beta2 = 0.4f;
+  float epsilon = 1e-8f;
+  float lambda = 0.0f;
 
-    bool maximize = false;
-    bool use_adazo = false;
+  bool maximize = false;
+  bool use_adazo = false;
 
-    int num_proc = 1;
+  int num_proc = 1;
 
-    template<class Archive>
-    void serialize(Archive& ar) {
-      ar(lr, beta1, beta2, epsilon, lambda, maximize, use_adazo);
-    }
-  };
+  template <class Archive>
+  void serialize(Archive& ar) {
+    ar(lr, beta1, beta2, epsilon, lambda, maximize, use_adazo);
+  }
+};
 
-  template<typename DedupedTuple>
-  struct AdamState : public OptimizerState {
-    detail::ExtractedVector<DedupedTuple> momentum{};
-    detail::ExtractedVector<DedupedTuple> velocity{};
-  };
+template <typename DedupedTuple>
+struct AdamState : public OptimizerState {
+  detail::ExtractedVector<DedupedTuple> momentum{};
+  detail::ExtractedVector<DedupedTuple> velocity{};
+};
 
-  template<typename DedupedPack>
-    requires detail::NonConstPack<DedupedPack>
-  class Adam : public Optimizer<DedupedPack> {
-    public:
-      explicit Adam(ParameterPack<DedupedPack> parameters, AdamOptions options = {})
-        : Optimizer<DedupedPack>(parameters), options_(options) {
-          std::apply([&](auto&... param_vecs) {
-            ([&](auto& param_vec) {
-              using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-              auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
-              auto& vel = std::get<detail::ExtractType_t<ParamType>>(this->state_.velocity);
-              for (auto& param_ref : param_vec) {
-                auto& param = param_ref.get();
-                using T = typename ParamType::DataType;
-                mom.insert(mom.end(), param.numel(), T(0));
-                vel.insert(vel.end(), param.numel(), T(0));
-              }
-            }(param_vecs), ...);
-          }, this->parameters_.data);
-        }
+template <typename DedupedPack>
+  requires detail::NonConstPack<DedupedPack>
+class Adam : public Optimizer<DedupedPack> {
+ public:
+  explicit Adam(ParameterPack<DedupedPack> parameters, AdamOptions options = {})
+      : Optimizer<DedupedPack>(parameters), options_(options) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
+            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+            auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
+            auto& vel = std::get<detail::ExtractType_t<ParamType>>(this->state_.velocity);
+            for (auto& param_ref : param_vec) {
+              auto& param = param_ref.get();
+              using T = typename ParamType::DataType;
+              mom.insert(mom.end(), param.numel(), T(0));
+              vel.insert(vel.end(), param.numel(), T(0));
+            }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void step() override {
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+  void step() override {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
             auto& mom_full = std::get<detail::ExtractType_t<ParamType>>(state_.momentum);
             auto& vel_full = std::get<detail::ExtractType_t<ParamType>>(state_.velocity);
@@ -96,17 +103,20 @@ namespace mirage::optim {
                       mom = eve::fnma(beta1, grad, mom);
 
                       eve::wide<T> beta2(options_.beta2);
-                      auto grad_squared = (options_.use_adazo) ? eve::mul(mom, mom) : eve::mul(grad, grad);
+                      auto grad_squared =
+                        (options_.use_adazo) ? eve::mul(mom, mom) : eve::mul(grad, grad);
                       vel = eve::fma(beta2, vel, grad_squared);
                       vel = eve::fnma(beta2, grad_squared, vel);
 
                       eve::store(mom, &mom_full[state_offset + i + offset]);
                       eve::store(vel, &vel_full[state_offset + i + offset]);
 
-                      auto update = eve::div(mom, eve::add(eve::sqrt(vel), eve::wide<T>(options_.epsilon)));
+                      auto update =
+                        eve::div(mom, eve::add(eve::sqrt(vel), eve::wide<T>(options_.epsilon)));
                       eve::wide<T> data(&data_full[i + offset]);
 
-                      if (options_.lambda) update = eve::fnma(eve::wide<T>(options_.lambda), data, update);
+                      if (options_.lambda)
+                        update = eve::fnma(eve::wide<T>(options_.lambda), data, update);
                       data = eve::fma(eve::wide<T>(options_.lr), update, data);
                       eve::store(data, &data_full[i + offset]);
                     });
@@ -115,8 +125,10 @@ namespace mirage::optim {
                   for (; i < end; ++i) {
                     T grad = options_.maximize ? -grad_full[i] : grad_full[i];
 
-                    T mom = options_.beta1 * mom_full[state_offset + i] + (1 - options_.beta1) * grad;
-                    T vel = options_.beta2 * vel_full[state_offset + i] + (1 - options_.beta2) * grad * grad;
+                    T mom =
+                      options_.beta1 * mom_full[state_offset + i] + (1 - options_.beta1) * grad;
+                    T vel = options_.beta2 * vel_full[state_offset + i] +
+                            (1 - options_.beta2) * grad * grad;
 
                     mom_full[state_offset + i] = mom;
                     vel_full[state_offset + i] = vel;
@@ -135,64 +147,79 @@ namespace mirage::optim {
 
               state_offset += param.numel();
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-        this->state_.step++;
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+    this->state_.step++;
+  }
 
-      void load_from_bin(const std::string& path_str) override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void load_from_bin(const std::string& path_str) override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
+    if (!std::filesystem::exists(path)) throw std::runtime_error("File not found: " + path_str);
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryInputArchive ar(in);
-        std::string name;
-        ar(name);
-        if (name != optimizer_type()) this->handle_type_error(name);
+    cereal::BinaryInputArchive ar(in);
+    std::string name;
+    ar(name);
+    if (name != optimizer_type()) this->handle_type_error(name);
 
-        ar(options_, state_.step, state_.momentum, state_.velocity);
+    ar(options_, state_.step, state_.momentum, state_.velocity);
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      void save_to_bin(const std::string& path_str) const override {
-        std::filesystem::path path(path_str);
-        path.replace_extension(".bin");
+  void save_to_bin(const std::string& path_str) const override {
+    std::filesystem::path path(path_str);
+    path.replace_extension(".bin");
 
-        std::ofstream out(path, std::ios::binary);
-        if (!out) throw std::runtime_error("Failed to open file: " + path_str);
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("Failed to open file: " + path_str);
 
-        cereal::BinaryOutputArchive ar(out);
-        std::string name(optimizer_type());
+    cereal::BinaryOutputArchive ar(out);
+    std::string name(optimizer_type());
 
-        ar(name, options_, state_.step, state_.momentum, state_.velocity);
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    ar(name, options_, state_.step, state_.momentum, state_.velocity);
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             for (auto& param_ref : param_vec) {
               ar(param_ref.get().data());
               ar(param_ref.get().grad());
             }
-          }(param_vecs), ...);
-        }, this->parameters_.data);
-      }
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
+  }
 
-      std::string optimizer_type() const override {
-        std::string type = "Adam<";
-        bool first = true;
+  std::string optimizer_type() const override {
+    std::string type = "Adam<";
+    bool first = true;
 
-        std::apply([&](auto&... param_vecs) {
-          ([&](auto& param_vec) {
+    std::apply(
+      [&](auto&... param_vecs) {
+        (
+          [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
 
             if (!first) type += ", ";
@@ -212,15 +239,18 @@ namespace mirage::optim {
             }
 
             type += "]";
-          }(param_vecs), ...);
-        }, this->parameters_.data);
+          }(param_vecs),
+          ...);
+      },
+      this->parameters_.data
+    );
 
-        type += ">";
-        return type;
-      }
+    type += ">";
+    return type;
+  }
 
-    private:
-      AdamOptions options_;
-      AdamState<DedupedPack> state_;
-  };
-}
+ private:
+  AdamOptions options_;
+  AdamState<DedupedPack> state_;
+};
+}  // namespace mirage::optim
