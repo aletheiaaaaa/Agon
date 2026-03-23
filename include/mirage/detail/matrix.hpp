@@ -50,21 +50,19 @@ inline void triple(
         std::array<eve::wide<T>, y_height> b_tile;
 
         unroll<x_height>([&]<size_t idx>() {
-          a_tile[idx] = (idx < i_rem)
-                          ? eve::wide<T>(A[(x_chunk + i + idx) * K + k])
-                          : eve::wide<T>(T(0));
+          a_tile[idx] =
+            (idx < i_rem) ? eve::wide<T>(A[(x_chunk + i + idx) * K + k]) : eve::wide<T>(T(0));
         });
 
         unroll<y_height>([&]<size_t idx>() {
           size_t valid = std::min(vec_size, j_rem - idx * vec_size);
 
-          b_tile[idx] = (idx * vec_size < j_rem)
-                          ? eve::if_else(
-                              eve::keep_first(valid),
-                              eve::wide<T>(&B[k * N + j + vec_size * idx]),
-                              eve::zero
-                            )
-                          : eve::wide<T>(T(0));
+          b_tile[idx] =
+            (idx * vec_size < j_rem)
+              ? eve::if_else(
+                  eve::keep_first(valid), eve::wide<T>(&B[k * N + j + vec_size * idx]), eve::zero
+                )
+              : eve::wide<T>(T(0));
         });
 
         unroll<arr_size>([&]<size_t idx>() {
@@ -76,9 +74,7 @@ inline void triple(
       }
 
       std::array<T, x_height * y_height * vec_size> temp;
-      unroll<arr_size>([&]<size_t idx>() {
-        eve::store(acc0[idx], &temp[idx * vec_size]);
-      });
+      unroll<arr_size>([&]<size_t idx>() { eve::store(acc0[idx], &temp[idx * vec_size]); });
 
       for (size_t k = 0; k < y_chunk; k += y_height * vec_size) {
         size_t k_rem = std::min(y_height * vec_size, y_chunk - k);
@@ -94,8 +90,7 @@ inline void triple(
             size_t row = l % vec_size;
             size_t col = l / vec_size;
 
-            t_tile[idx] =
-              eve::wide<T>(temp[(col * x_height + idx) * vec_size + row]);
+            t_tile[idx] = eve::wide<T>(temp[(col * x_height + idx) * vec_size + row]);
           });
 
           unroll<y_height>([&]<size_t idx>() {
@@ -104,9 +99,7 @@ inline void triple(
             c_tile[idx] = (idx * vec_size < k_rem)
                             ? eve::if_else(
                                 eve::keep_first(valid),
-                                eve::wide<T>(
-                                  &C[(j + l) * P + y_chunk + k + idx * vec_size]
-                                ),
+                                eve::wide<T>(&C[(j + l) * P + y_chunk + k + idx * vec_size]),
                                 eve::zero
                               )
                             : eve::wide<T>(T(0));
@@ -125,19 +118,15 @@ inline void triple(
           constexpr size_t col = idx / x_height;
 
           if (row < i_rem && col * vec_size < k_rem) {
-            auto mask =
-              eve::keep_first(std::min(vec_size, k_rem - col * vec_size));
+            auto mask = eve::keep_first(std::min(vec_size, k_rem - col * vec_size));
 
             eve::wide<T> prev = eve::if_else(
               mask,
-              eve::wide<T>(
-                &out[(x_chunk + i + row) * P + y_chunk + k + col * vec_size]
-              ),
+              eve::wide<T>(&out[(x_chunk + i + row) * P + y_chunk + k + col * vec_size]),
               eve::zero
             );
             eve::store[mask](
-              prev + acc1[idx],
-              &out[(x_chunk + i + row) * P + y_chunk + k + col * vec_size]
+              prev + acc1[idx], &out[(x_chunk + i + row) * P + y_chunk + k + col * vec_size]
             );
           }
         });
@@ -151,20 +140,14 @@ inline void triple(
         constexpr size_t col = idx / x_height;
 
         if (row < i_rem && col * vec_size < j_rem) {
-          auto mask =
-            eve::keep_first(std::min(vec_size, j_rem - col * vec_size));
+          auto mask = eve::keep_first(std::min(vec_size, j_rem - col * vec_size));
 
           eve::wide<T> val = eve::if_else(
             mask,
-            eve::wide<T>(
-              &out[(x_chunk + i + row) * P + y_chunk + j + col * vec_size]
-            ),
+            eve::wide<T>(&out[(x_chunk + i + row) * P + y_chunk + j + col * vec_size]),
             eve::zero
           );
-          eve::store[mask](
-            func(val),
-            &out[(x_chunk + i + row) * P + y_chunk + j + col * vec_size]
-          );
+          eve::store[mask](func(val), &out[(x_chunk + i + row) * P + y_chunk + j + col * vec_size]);
         }
       });
     }
@@ -187,21 +170,8 @@ void triple_matmul_tile(
   size_t x_off,
   size_t y_off
 ) {
-  matrix::triple(
-    A,
-    B,
-    C,
-    out,
-    M,
-    K,
-    N,
-    P,
-    x_chunk,
-    y_chunk,
-    x_off,
-    y_off,
-    [&](eve::wide<T>& reg) {}
-  );
+  matrix::triple(A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, [&](eve::wide<T>& reg) {
+  });
 }
 
 template <typename T>
@@ -219,21 +189,9 @@ void triple_matmul_sign(
   size_t x_off,
   size_t y_off
 ) {
-  matrix::triple(
-    A,
-    B,
-    C,
-    out,
-    M,
-    K,
-    N,
-    P,
-    x_chunk,
-    y_chunk,
-    x_off,
-    y_off,
-    [&](eve::wide<T>& reg) { return eve::sign(reg); }
-  );
+  matrix::triple(A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, [&](eve::wide<T>& reg) {
+    return eve::sign(reg);
+  });
 }
 
 template <typename T>
@@ -268,22 +226,20 @@ void symmetrized_ema_tile(
         std::array<eve::wide<T>, y_height> tp_tile;
 
         unroll<x_height>([&]<size_t idx>() {
-          og_tile[idx] = (idx < i_rem)
-                           ? eve::wide<T>(X_og[(x_off + i + idx) * N + k])
-                           : eve::wide<T>(T(0));
+          og_tile[idx] =
+            (idx < i_rem) ? eve::wide<T>(X_og[(x_off + i + idx) * N + k]) : eve::wide<T>(T(0));
         });
 
         unroll<y_height>([&]<size_t idx>() {
           size_t valid = std::min(vec_size, j_rem - idx * vec_size);
 
-          tp_tile[idx] =
-            (idx * vec_size < j_rem)
-              ? eve::if_else(
-                  eve::keep_first(valid),
-                  eve::wide<T>(&X_tp[k * M + y_off + j + idx * vec_size]),
-                  eve::zero
-                )
-              : eve::wide<T>(T(0));
+          tp_tile[idx] = (idx * vec_size < j_rem)
+                           ? eve::if_else(
+                               eve::keep_first(valid),
+                               eve::wide<T>(&X_tp[k * M + y_off + j + idx * vec_size]),
+                               eve::zero
+                             )
+                           : eve::wide<T>(T(0));
         });
 
         unroll<arr_size>([&]<size_t idx>() {
@@ -303,9 +259,7 @@ void symmetrized_ema_tile(
 
           eve::wide<T> ema = eve::if_else(
             eve::keep_first(valid),
-            eve::wide<T>(
-              &E[(x_off + i + row) * M + y_off + j + col * vec_size]
-            ),
+            eve::wide<T>(&E[(x_off + i + row) * M + y_off + j + col * vec_size]),
             eve::zero
           );
           eve::wide<T> wt(ema_rate);
@@ -354,16 +308,12 @@ void ema_tile(
 
           eve::wide<T> ema = eve::if_else(
             eve::keep_first(valid),
-            eve::wide<T>(
-              &E[(x_off + i + row) * M + y_off + j + col * vec_size]
-            ),
+            eve::wide<T>(&E[(x_off + i + row) * M + y_off + j + col * vec_size]),
             eve::zero
           );
           eve::wide<T> data = eve::if_else(
             eve::keep_first(valid),
-            eve::wide<T>(
-              &X[(x_off + i + row) * M + y_off + j + col * vec_size]
-            ),
+            eve::wide<T>(&X[(x_off + i + row) * M + y_off + j + col * vec_size]),
             eve::zero
           );
           eve::wide<T> wt(ema_rate);
