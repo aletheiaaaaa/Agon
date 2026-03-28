@@ -55,7 +55,7 @@ inline void parallel(F&& func, size_t num_proc) {
   std::vector<std::thread> threads;
   threads.reserve(num_proc);
   for (size_t i = 0; i < num_proc; ++i) {
-    threads.emplace_back(std::forward<F>(func), i);
+    threads.emplace_back(func, i);
   }
   for (auto& thread : threads) {
     thread.join();

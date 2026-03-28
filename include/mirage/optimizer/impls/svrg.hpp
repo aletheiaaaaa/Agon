@@ -39,14 +39,16 @@ class SVRG : public Optimizer<DedupedPack> {
   public:
   explicit SVRG(ParameterPack<DedupedPack> parameters, SVRGOptions options = {})
     : Optimizer<DedupedPack>(parameters), options_(options) {
+    detail::test_oom(this->parameters_.data, [&](auto& param) { return 3 * param.numel(); });
+
     std::apply(
       [&](auto&... param_vecs) {
         (
           [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-            auto& ref_exact = std::get<detail::ExtractType_t<ParamType>>(this->state_.ref_exact);
-            auto& ref_est = std::get<detail::ExtractType_t<ParamType>>(this->state_.ref_est);
-            auto& ref_data = std::get<detail::ExtractType_t<ParamType>>(this->state_.ref_data);
+            auto& ref_exact = std::get<detail::ExtractType_t<ParamType>>(state_.ref_exact);
+            auto& ref_est = std::get<detail::ExtractType_t<ParamType>>(state_.ref_est);
+            auto& ref_data = std::get<detail::ExtractType_t<ParamType>>(state_.ref_data);
             for (auto& param_ref : param_vec) {
               auto& param = param_ref.get();
               using T = typename ParamType::DataType;
@@ -162,8 +164,8 @@ class SVRG : public Optimizer<DedupedPack> {
       },
       this->parameters_.data
     );
-    this->state_.step++;
     state_.use_ref = !state_.use_ref;
+    if (!state_.use_ref) state_.step++;
   }
 
   void load_from_bin(const std::string& path_str) override {
@@ -224,40 +226,7 @@ class SVRG : public Optimizer<DedupedPack> {
   }
 
   std::string optimizer_type() const override {
-    std::string type = "SVRG<";
-    bool first = true;
-
-    std::apply(
-      [&](auto&... param_vecs) {
-        (
-          [&](auto& param_vec) {
-            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-
-            if (!first) type += ", ";
-            first = false;
-            type += detail::PrintType<ParamType>::name() + "[";
-
-            bool pfirst = true;
-            for (auto& param_ref : param_vec) {
-              if (!pfirst) type += ",";
-              pfirst = false;
-
-              auto& shape = param_ref.get().size();
-              for (int i = 0; i < shape.size(); ++i) {
-                if (i > 0) type += "x";
-                type += std::to_string(shape[i]);
-              }
-            }
-
-            type += "]";
-          }(param_vecs),
-          ...);
-      },
-      this->parameters_.data
-    );
-
-    type += ">";
-    return type;
+    return "SVRG<" + detail::type_names(this->parameters_.data) + ">";
   }
 
   private:

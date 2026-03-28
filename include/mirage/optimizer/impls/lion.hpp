@@ -38,12 +38,14 @@ class Lion : public Optimizer<DedupedPack> {
   public:
   explicit Lion(ParameterPack<DedupedPack> parameters, LionOptions options = {})
     : Optimizer<DedupedPack>(parameters), options_(options) {
+    detail::test_oom(this->parameters_.data, [&](auto& param) { return param.numel(); });
+
     std::apply(
       [&](auto&... param_vecs) {
         (
           [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-            auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
+            auto& mom = std::get<detail::ExtractType_t<ParamType>>(state_.momentum);
             for (auto& param_ref : param_vec) {
               auto& param = param_ref.get();
               using T = typename ParamType::DataType;
@@ -137,7 +139,7 @@ class Lion : public Optimizer<DedupedPack> {
       },
       this->parameters_.data
     );
-    this->state_.step++;
+    state_.step++;
   }
 
   void load_from_bin(const std::string& path_str) override {
@@ -197,45 +199,12 @@ class Lion : public Optimizer<DedupedPack> {
     );
   }
 
-  std::string optimizer_type() const override {
-    std::string type = "Lion<";
-    bool first = true;
-
-    std::apply(
-      [&](auto&... param_vecs) {
-        (
-          [&](auto& param_vec) {
-            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-
-            if (!first) type += ", ";
-            first = false;
-            type += detail::PrintType<ParamType>::name() + "[";
-
-            bool pfirst = true;
-            for (auto& param_ref : param_vec) {
-              if (!pfirst) type += ",";
-              pfirst = false;
-
-              auto& shape = param_ref.get().size();
-              for (int i = 0; i < shape.size(); ++i) {
-                if (i > 0) type += "x";
-                type += std::to_string(shape[i]);
-              }
-            }
-
-            type += "]";
-          }(param_vecs),
-          ...);
-      },
-      this->parameters_.data
-    );
-
-    type += ">";
-    return type;
-  }
-
   private:
   LionOptions options_;
   LionState<DedupedPack> state_;
+
+  std::string optimizer_type() const override {
+    return "Lion<" + detail::type_names(this->parameters_.data) + ">";
+  }
 };
 }  // namespace mirage::optim

@@ -454,7 +454,18 @@ class Parameter {
       shape_.rbegin(), shape_.rend(), strides_.rbegin(), int{1}, std::multiplies<int>{}
     );
 
-    int num = std::accumulate(shape_.begin(), shape_.end(), int{1}, std::multiplies<int>{});
+    int64_t num = std::accumulate(shape_.begin(), shape_.end(), int{1}, std::multiplies<int>{});
+    int64_t bytes = 2 * num * sizeof(T) / (1024 * 1024);
+    const char* max = std::getenv("MIRAGE_PARAMETER_MEMMAX");
+    int max_bytes = (max == nullptr) ? 128 : std::stoi(max);
+    if (bytes > max_bytes)
+      throw std::runtime_error(
+        "Out of memory, tried to allocate " + std::to_string(bytes) + " MiB out of a max of " +
+        std::to_string(max_bytes) +
+        " MiB. You can increase this using the \"MIRAGE_PARAMETER_MEMMAX\" environment "
+        "variable."
+      );
+
     data_.resize(num);
     grad_.resize(num);
   }
@@ -635,20 +646,14 @@ template <typename T>
 using RefVec = std::vector<std::reference_wrapper<T>>;
 }
 
-template <typename DedupedTuple>
+template <typename DedupedPack>
 struct ParameterPack {
-  detail::TransformTuple_t<detail::RefVec, DedupedTuple> data{};
+  detail::TransformTuple_t<detail::RefVec, DedupedPack> data{};
 
   template <typename... Ts>
     requires(std::derived_from<Ts, Parameter<typename Ts::DataType>> && ...)
   ParameterPack(Ts&... params) {
     (std::get<detail::RefVec<Ts>>(data).emplace_back(params), ...);
-  }
-
-  template <typename T>
-    requires std::derived_from<T, Parameter<typename T::DataType>>
-  void add_parameter(T& param) {
-    std::get<detail::RefVec<T>>(data).emplace_back(param);
   }
 };
 template <typename... Ts>
@@ -717,5 +722,41 @@ struct PrintType<Quantized<Q, T>> {
 
 template <typename DedupedTuple>
 using ExtractedVector = detail::TransformTuple_t<ExtractType_t, DedupedTuple>;
+
+std::string type_names(auto& parameters) {
+  std::string type;
+  bool first = true;
+
+  std::apply(
+    [&](auto&... param_vecs) {
+      (
+        [&](auto& param_vec) {
+          using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
+
+          if (!first) type += ", ";
+          first = false;
+          type += detail::PrintType<ParamType>::name() + "[";
+
+          bool pfirst = true;
+          for (auto& param_ref : param_vec) {
+            if (!pfirst) type += ",";
+            pfirst = false;
+
+            auto& shape = param_ref.get().size();
+            for (int i = 0; i < shape.size(); ++i) {
+              if (i > 0) type += "x";
+              type += std::to_string(shape[i]);
+            }
+          }
+
+          type += "]";
+        }(param_vecs),
+        ...);
+    },
+    parameters
+  );
+
+  return type;
+}
 }  // namespace detail
 }  // namespace mirage

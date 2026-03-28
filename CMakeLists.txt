@@ -15,8 +15,12 @@ option(MIRAGE_ENABLE_NEON "Enable ARM NEON instructions (if available)" ON)
 
 include(FetchContent)
 
-find_package(eve QUIET)
-if(NOT eve_FOUND)
+find_path(EVE_INCLUDE_DIR eve/eve.hpp)
+if(EVE_INCLUDE_DIR)
+  message(STATUS "Found eve headers: ${EVE_INCLUDE_DIR}")
+  set(MIRAGE_EVE_FOUND TRUE)
+else()
+  message(STATUS "eve not found — fetching via FetchContent")
   FetchContent_Declare(
     eve
     GIT_REPOSITORY https://github.com/jfalcou/eve.git
@@ -30,8 +34,12 @@ if(NOT eve_FOUND)
   set(MIRAGE_EVE_FETCHED TRUE)
 endif()
 
-find_package(cereal QUIET)
-if(NOT cereal_FOUND)
+find_path(CEREAL_INCLUDE_DIR cereal/cereal.hpp)
+if(CEREAL_INCLUDE_DIR)
+  message(STATUS "Found cereal headers: ${CEREAL_INCLUDE_DIR}")
+  set(MIRAGE_CEREAL_FOUND TRUE)
+else()
+  message(STATUS "cereal not found — fetching via FetchContent")
   FetchContent_Declare(
     cereal
     GIT_REPOSITORY https://github.com/USCiLab/cereal.git
@@ -43,8 +51,12 @@ if(NOT cereal_FOUND)
   set(MIRAGE_CEREAL_FETCHED TRUE)
 endif()
 
-find_package(Eigen3 QUIET)
-if(NOT Eigen3_FOUND)
+find_path(EIGEN_INCLUDE_DIR Eigen/Core PATH_SUFFIXES eigen3)
+if(EIGEN_INCLUDE_DIR)
+  message(STATUS "Found Eigen headers: ${EIGEN_INCLUDE_DIR}")
+  set(MIRAGE_EIGEN_FOUND TRUE)
+else()
+  message(STATUS "Eigen not found — fetching via FetchContent")
   FetchContent_Declare(
     Eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -72,22 +84,24 @@ target_include_directories(mirage
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-if(MIRAGE_EVE_FETCHED)
+# --- Link / include deps ---
+
+if(MIRAGE_EVE_FOUND)
+  target_include_directories(mirage INTERFACE ${EVE_INCLUDE_DIR})
+else()
   target_include_directories(mirage INTERFACE $<BUILD_INTERFACE:${eve_SOURCE_DIR}/include>)
-else()
-  target_link_libraries(mirage INTERFACE eve::eve)
 endif()
 
-if(MIRAGE_CEREAL_FETCHED)
+if(MIRAGE_CEREAL_FOUND)
+  target_include_directories(mirage INTERFACE ${CEREAL_INCLUDE_DIR})
+else()
   target_include_directories(mirage INTERFACE $<BUILD_INTERFACE:${cereal_SOURCE_DIR}/include>)
-else()
-  target_link_libraries(mirage INTERFACE cereal::cereal)
 endif()
 
-if(MIRAGE_EIGEN_FETCHED)
-  target_include_directories(mirage INTERFACE $<BUILD_INTERFACE:${eigen_SOURCE_DIR}>)
+if(MIRAGE_EIGEN_FOUND)
+  target_include_directories(mirage INTERFACE ${EIGEN_INCLUDE_DIR})
 else()
-  target_link_libraries(mirage INTERFACE Eigen3::Eigen)
+  target_include_directories(mirage INTERFACE $<BUILD_INTERFACE:${eigen_SOURCE_DIR}>)
 endif()
 
 # Compiler-specific settings
@@ -98,12 +112,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   else()
     # Check architecture
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-      # ARM64 - NEON is always available
       if(MIRAGE_ENABLE_NEON)
         message(STATUS "ARM64 detected - NEON is enabled by default")
       endif()
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
-      # 32-bit ARM
       if(MIRAGE_ENABLE_NEON)
         include(CheckCXXCompilerFlag)
         check_cxx_compiler_flag("-mfpu=neon" COMPILER_SUPPORTS_NEON)
@@ -113,7 +125,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         endif()
       endif()
     else()
-      # x86/x86_64
       if(MIRAGE_ENABLE_AVX512)
         include(CheckCXXCompilerFlag)
         check_cxx_compiler_flag("-mavx512f" COMPILER_SUPPORTS_AVX512F)
@@ -142,12 +153,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 
 elseif(MSVC)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64")
-    # MSVC ARM64 - NEON is implicit
     if(MIRAGE_ENABLE_NEON)
       message(STATUS "MSVC ARM64 detected - NEON is enabled by default")
     endif()
   else()
-    # x86/x64
     if(MIRAGE_ENABLE_AVX512)
       target_compile_options(mirage INTERFACE /arch:AVX512)
     elseif(MIRAGE_ENABLE_AVX2)
@@ -256,7 +265,6 @@ foreach(file \${files})
   endif()
 endforeach()
 
-# Remove directories that were installed by mirage (only if we fetched them)
 set(MIRAGE_EVE_FETCHED ${MIRAGE_EVE_FETCHED})
 set(MIRAGE_CEREAL_FETCHED ${MIRAGE_CEREAL_FETCHED})
 set(MIRAGE_EIGEN_FETCHED ${MIRAGE_EIGEN_FETCHED})
@@ -285,7 +293,6 @@ if(MIRAGE_EIGEN_FETCHED)
   endif()
 endif()
 
-# Remove mirage includes
 set(mirage_dir \"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/mirage\")
 if(EXISTS \"\${mirage_dir}\")
   message(STATUS \"Removing mirage directory: \${mirage_dir}\")

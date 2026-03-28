@@ -2,7 +2,6 @@
 
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -48,33 +47,23 @@ class SPlus : public Optimizer<DedupedPack> {
   public:
   explicit SPlus(ParameterPack<DedupedPack> parameters, SPlusOptions options = {})
     : Optimizer<DedupedPack>(parameters), options_(options) {
-    assert(
-      std::apply(
-        [](auto&... param_vecs) {
-          return (
-            std::all_of(
-              param_vecs.begin(), param_vecs.end(), [](auto& p) { return p.get().rank() >= 2; }
-            ) &&
-            ...
-          );
-        },
-        this->parameters_.data
-      ) &&
-      "All parameters must have at least 2 dimensions"
-    );
+    detail::test_multidim(this->parameters_.data);
+    detail::test_oom(this->parameters_.data, [&](auto& param) {
+      return 2 *
+             (param.numel() + param.size(0) * param.size(0) + param.strides(0) * param.strides(0));
+    });
 
     std::apply(
       [&](auto&... param_vecs) {
         (
           [&](auto& param_vec) {
             using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-            auto& mom = std::get<detail::ExtractType_t<ParamType>>(this->state_.momentum);
-            auto& lvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_velocity);
-            auto& rvel = std::get<detail::ExtractType_t<ParamType>>(this->state_.right_velocity);
-            auto& leig = std::get<detail::ExtractType_t<ParamType>>(this->state_.left_eigenvectors);
-            auto& reig =
-              std::get<detail::ExtractType_t<ParamType>>(this->state_.right_eigenvectors);
-            auto& ema = std::get<detail::ExtractType_t<ParamType>>(this->state_.param_ema);
+            auto& mom = std::get<detail::ExtractType_t<ParamType>>(state_.momentum);
+            auto& lvel = std::get<detail::ExtractType_t<ParamType>>(state_.left_velocity);
+            auto& rvel = std::get<detail::ExtractType_t<ParamType>>(state_.right_velocity);
+            auto& leig = std::get<detail::ExtractType_t<ParamType>>(state_.left_eigenvectors);
+            auto& reig = std::get<detail::ExtractType_t<ParamType>>(state_.right_eigenvectors);
+            auto& ema = std::get<detail::ExtractType_t<ParamType>>(state_.param_ema);
             for (auto& param_ref : param_vec) {
               auto& param = param_ref.get();
               int l_numel = param.size(0) * param.size(0);
@@ -230,7 +219,7 @@ class SPlus : public Optimizer<DedupedPack> {
 
               using Matrix = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
-              if (this->state_.step % options_.decompose_every == 0) {
+              if (state_.step % options_.decompose_every == 0) {
                 Eigen::Map<Matrix> lvel_format(lvel_slice.data(), width, width);
                 Eigen::Map<Matrix> rvel_format(rvel_slice.data(), height, height);
 
@@ -316,7 +305,7 @@ class SPlus : public Optimizer<DedupedPack> {
       },
       this->parameters_.data
     );
-    this->state_.step++;
+    state_.step++;
   }
 
   void load_from_bin(const std::string& path_str) override {
@@ -339,6 +328,8 @@ class SPlus : public Optimizer<DedupedPack> {
       state_.momentum,
       state_.left_velocity,
       state_.right_velocity,
+      state_.left_eigenvectors,
+      state_.right_eigenvectors,
       state_.param_ema
     );
 
@@ -373,6 +364,8 @@ class SPlus : public Optimizer<DedupedPack> {
       state_.momentum,
       state_.left_velocity,
       state_.right_velocity,
+      state_.left_eigenvectors,
+      state_.right_eigenvectors,
       state_.param_ema
     );
 
@@ -390,45 +383,12 @@ class SPlus : public Optimizer<DedupedPack> {
     );
   }
 
-  std::string optimizer_type() const override {
-    std::string type = "SPlus<";
-    bool first = true;
-
-    std::apply(
-      [&](auto&... param_vecs) {
-        (
-          [&](auto& param_vec) {
-            using ParamType = typename std::remove_cvref_t<decltype(param_vec)>::value_type::type;
-
-            if (!first) type += ", ";
-            first = false;
-            type += detail::PrintType<ParamType>::name() + "[";
-
-            bool pfirst = true;
-            for (auto& param_ref : param_vec) {
-              if (!pfirst) type += ",";
-              pfirst = false;
-
-              auto& shape = param_ref.get().size();
-              for (int i = 0; i < shape.size(); ++i) {
-                if (i > 0) type += "x";
-                type += std::to_string(shape[i]);
-              }
-            }
-
-            type += "]";
-          }(param_vecs),
-          ...);
-      },
-      this->parameters_.data
-    );
-
-    type += ">";
-    return type;
-  }
-
   private:
   SPlusOptions options_;
   SPlusState<DedupedPack> state_;
+
+  std::string optimizer_type() const override {
+    return "SPlus<" + detail::type_names(this->parameters_.data) + ">";
+  }
 };
 }  // namespace mirage::optim

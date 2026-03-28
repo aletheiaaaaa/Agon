@@ -6,6 +6,7 @@
 #include <eve/conditional.hpp>
 #include <eve/module/core.hpp>
 #include <eve/module/core/regular/if_else.hpp>
+#include <eve/module/core/regular/sqrt.hpp>
 #include <eve/module/core/regular/store.hpp>
 #include <vector>
 
@@ -13,7 +14,7 @@
 
 namespace mirage::detail {
 namespace matrix {
-template <typename T, typename F>
+template <bool take_sign, typename T, typename F>
 inline void triple(
   std::span<const T> A,
   std::span<const T> B,
@@ -27,7 +28,6 @@ inline void triple(
   int y_chunk,
   int x_off,
   int y_off,
-  bool take_sign,
   F&& func
 ) {
   constexpr int x_height = UNROLL_FACTOR;
@@ -157,7 +157,7 @@ inline void triple(
   }
 }
 
-template <typename T, bool compute_ema>
+template <typename T, bool compute_ema, bool squared_fma>
 inline void matrix_fma(
   std::span<const T> X,
   std::span<T> Y,
@@ -202,6 +202,7 @@ inline void matrix_fma(
           );
           eve::wide<T> mul(fma_mul);
 
+          if (squared_fma) data = data * data;
           res = eve::fma(mul, res, data);
           if (compute_ema) res = eve::fnma(mul, data, res);
 
@@ -231,9 +232,11 @@ void triple_tile(
   int y_off,
   bool maximize
 ) {
-  matrix::triple(A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, false, [&](auto& reg) {
-    return ((maximize) ? -1 : 1) * eve::sign(reg);
-  });
+  matrix::triple<false, T>(
+    A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, [&](auto& reg) {
+      return ((maximize) ? -1 : 1) * eve::sign(reg);
+    }
+  );
 }
 
 template <typename T>
@@ -251,13 +254,15 @@ void norm_triple_sign_tile(
   int x_off,
   int y_off
 ) {
-  matrix::triple(A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, true, [&](auto& reg) {
-    eve::wide<T> m_reg(M);
-    eve::wide<T> n_reg(N);
-    eve::wide<T> twos(T(2));
+  matrix::triple<false, T>(
+    A, B, C, out, M, K, N, P, x_chunk, y_chunk, x_off, y_off, [&](auto& reg) {
+      eve::wide<T> m_reg(M);
+      eve::wide<T> n_reg(N);
+      eve::wide<T> twos(T(2));
 
-    return reg * twos / (m_reg + n_reg);
-  });
+      return reg * twos / (m_reg + n_reg);
+    }
+  );
 }
 
 template <typename T>
@@ -357,7 +362,7 @@ void fma_tile(
   int y_off,
   float fma_mul
 ) {
-  matrix::matrix_fma<T, false>(X, Y, M, N, x_chunk, y_chunk, x_off, y_off, fma_mul);
+  matrix::matrix_fma<T, false, false>(X, Y, M, N, x_chunk, y_chunk, x_off, y_off, fma_mul);
 }
 
 template <typename T>
@@ -372,7 +377,22 @@ void ema_tile(
   int y_off,
   float ema_rate
 ) {
-  matrix::matrix_fma<T, true>(X, E, M, N, x_chunk, y_chunk, x_off, y_off, ema_rate);
+  matrix::matrix_fma<T, true, false>(X, E, M, N, x_chunk, y_chunk, x_off, y_off, ema_rate);
+}
+
+template <typename T>
+void squared_ema_tile(
+  std::span<const T> X,
+  std::span<T> E,
+  int M,
+  int N,
+  int x_chunk,
+  int y_chunk,
+  int x_off,
+  int y_off,
+  float ema_rate
+) {
+  matrix::matrix_fma<T, true, true>(X, E, M, N, x_chunk, y_chunk, x_off, y_off, ema_rate);
 }
 
 template <typename T>
@@ -434,4 +454,62 @@ void negate_tile(
     }
   }
 }
+
+template <typename T>
+void adam_tile(
+  std::span<const T> X,
+  std::span<const T> Y,
+  std::span<T> Z,
+  int M,
+  int N,
+  int x_chunk,
+  int y_chunk,
+  int x_off,
+  int y_off,
+  float epsilon
+) {
+  constexpr int x_height = UNROLL_FACTOR;
+  constexpr int y_height = std::max(1, UNROLL_FACTOR / 2);
+  constexpr int vec_size = eve::wide<T>::size();
+  constexpr int arr_size = x_height * y_height;
+
+  x_chunk = std::min(x_chunk, M - x_off);
+  y_chunk = std::min(y_chunk, N - y_off);
+
+  for (int i = 0; i < x_chunk; i += x_height) {
+    int i_rem = std::min(x_height, x_chunk - i);
+
+    for (int j = 0; j < y_chunk; j += y_height * vec_size) {
+      int j_rem = std::min(y_height * vec_size, y_chunk - j);
+
+      unroll<arr_size>([&]<int idx>() {
+        constexpr int row = idx % x_height;
+        constexpr int col = idx / x_height;
+
+        if (row < i_rem && col * vec_size < j_rem) {
+          auto valid = std::min(vec_size, j_rem - col * vec_size);
+
+          eve::wide<T> mom = eve::if_else(
+            eve::keep_first(valid),
+            eve::wide<T>(&X[(x_off + i + row) * N + y_off + j + col * vec_size]),
+            eve::zero
+          );
+          eve::wide<T> vel = eve::if_else(
+            eve::keep_first(valid),
+            eve::wide<T>(&Y[(x_off + i + row) * N + y_off + j + col * vec_size]),
+            eve::zero
+          );
+
+          auto eps = eve::wide<T>(T(epsilon));
+          auto res = mom / (eve::sqrt(vel) + eps);
+
+          eve::store[eve::keep_first(valid)](
+            res, &Z[(x_off + i + row) * N + y_off + j + col * vec_size]
+          );
+        }
+      });
+    }
+  }
+}
+
 }  // namespace mirage::detail

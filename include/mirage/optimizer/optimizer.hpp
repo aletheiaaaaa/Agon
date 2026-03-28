@@ -5,7 +5,59 @@
 
 #include "../parameter.hpp"
 
-namespace mirage::optim {
+namespace mirage {
+namespace detail {
+void test_multidim(auto& parameters) {
+  bool is_multidim = std::apply(
+    [](auto&... param_vecs) {
+      return (
+        std::all_of(
+          param_vecs.begin(), param_vecs.end(), [](auto& p) { return p.get().rank() >= 2; }
+        ) &&
+        ...
+      );
+    },
+    parameters
+  );
+
+  if (!is_multidim)
+    throw std::runtime_error("All parameters must have at least 2 dimensions for this optimizer");
+}
+
+template <typename F>
+void test_oom(auto& parameters, F&& func) {
+  int64_t bytes = 0;
+  std::apply(
+    [&](auto&... param_vecs) {
+      (
+        [&](auto& param_vec) {
+          using ParamType =
+            typename std::remove_cvref_t<decltype(param_vec)>::value_type::type::DataType;
+
+          std::ranges::for_each(param_vec, [&](auto& param_ref) {
+            auto param = param_ref.get();
+            bytes += sizeof(ParamType) * func(param);
+          });
+        }(param_vecs),
+        ...);
+    },
+    parameters
+  );
+
+  bytes /= (1024 * 1024);
+  const char* max = std::getenv("MIRAGE_OPTIMIZER_MEMMAX");
+  int max_bytes = (max == nullptr) ? 512 : std::stoi(max);
+  if (bytes > max_bytes)
+    throw std::runtime_error(
+      "Out of memory, tried to allocate " + std::to_string(bytes) + " MiB out of a max of " +
+      std::to_string(max_bytes) +
+      " MiB. You can increase this using the \"MIRAGE_OPTIMIZER_MEMMAX\" environment "
+      "variable."
+    );
+}
+}  // namespace detail
+
+namespace optim {
 struct OptimizerState {
   int64_t step = 0;
 };
@@ -40,13 +92,12 @@ class Optimizer {
   virtual void load_from_bin(const std::string& path) = 0;
   virtual void save_to_bin(const std::string& path) const = 0;
 
-  virtual std::string optimizer_type() const = 0;
-
   ~Optimizer() = default;
 
   protected:
-  OptimizerState state_;
   ParameterPack<DedupedPack> parameters_;
+
+  virtual std::string optimizer_type() const = 0;
 
   void handle_type_error(const std::string& recieved) const {
     const std::string expected = optimizer_type();
@@ -160,4 +211,5 @@ class Optimizer {
     throw std::runtime_error("Optimizer type mismatch: expected " + expected + ", got " + recieved);
   }
 };
-}  // namespace mirage::optim
+}  // namespace optim
+}  // namespace mirage
